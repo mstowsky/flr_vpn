@@ -7,7 +7,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.database import Base
-from app.models import User  # noqa: F401 — регистрирует модель в metadata
+from app.models import Plan, User
 
 
 config = context.config
