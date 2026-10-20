@@ -1,0 +1,135 @@
+from collections.abc import AsyncIterator
+
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.database import Base
+from app.models.user import User
+from app.services.users import get_or_create_user
+
+
+@pytest.fixture
+async def session() -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with session_factory() as db_session:
+        yield db_session
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_new_user(session: AsyncSession) -> None:
+    user, is_new = await get_or_create_user(
+        session,
+        telegram_id=100001,
+        username="test_user",
+        first_name="Test",
+    )
+
+    assert is_new is True
+    assert user.id is not None
+    assert user.telegram_id == 100001
+    assert user.username == "test_user"
+    assert user.first_name == "Test"
+
+
+@pytest.mark.asyncio
+async def test_repeated_call_does_not_create_duplicate(
+    session: AsyncSession,
+) -> None:
+    first_user, first_is_new = await get_or_create_user(
+        session,
+        telegram_id=100002,
+        username="test_user",
+        first_name="Test",
+    )
+
+    second_user, second_is_new = await get_or_create_user(
+        session,
+        telegram_id=100002,
+        username="test_user",
+        first_name="Test",
+    )
+
+    result = await session.execute(
+        select(func.count()).select_from(User)
+    )
+    user_count = result.scalar_one()
+
+    assert first_is_new is True
+    assert second_is_new is False
+    assert first_user.id == second_user.id
+    assert user_count == 1
+
+
+@pytest.mark.asyncio
+async def test_existing_user_profile_is_updated(
+    session: AsyncSession,
+) -> None:
+    await get_or_create_user(
+        session,
+        telegram_id=100003,
+        username="old_username",
+        first_name="Old name",
+    )
+
+    user, is_new = await get_or_create_user(
+        session,
+        telegram_id=100003,
+        username="new_username",
+        first_name="New name",
+    )
+
+    assert is_new is False
+    assert user.username == "new_username"
+    assert user.first_name == "New name"
+
+    result = await session.execute(
+        select(User).where(User.telegram_id == 100003)
+    )
+    saved_user = result.scalar_one()
+
+    assert saved_user.username == "new_username"
+    assert saved_user.first_name == "New name"
+
+
+@pytest.mark.asyncio
+async def test_different_telegram_ids_create_different_users(
+    session: AsyncSession,
+) -> None:
+    first_user, _ = await get_or_create_user(
+        session,
+        telegram_id=100004,
+        username="first_user",
+        first_name="First",
+    )
+
+    second_user, _ = await get_or_create_user(
+        session,
+        telegram_id=100005,
+        username="second_user",
+        first_name="Second",
+    )
+
+    assert first_user.id != second_user.id
+    assert first_user.telegram_id != second_user.telegram_id
+
+    result = await session.execute(
+        select(func.count()).select_from(User)
+    )
+    assert result.scalar_one() == 2
