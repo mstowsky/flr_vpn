@@ -1,39 +1,12 @@
-from collections.abc import AsyncIterator
-
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import Base
 from app.models.plan import Plan
 from app.services.plans import (
     create_plan,
     get_active_plans,
-    get_plan_by_id,
-)
-
-
-@pytest.fixture
-async def session() -> AsyncIterator[AsyncSession]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-
-    session_factory = async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    async with session_factory() as db_session:
-        yield db_session
-
-    await engine.dispose()
+    get_plan_by_id)
 
 
 @pytest.mark.asyncio
