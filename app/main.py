@@ -6,6 +6,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 
 from app.bot.main import start_bot
 from app.config import BOT_TOKEN
+from app.database import close_db
 
 
 async def main() -> None:
@@ -17,7 +18,10 @@ async def main() -> None:
     try:
         await start_bot(bot)
     finally:
-        await bot.session.close()
+        try:
+            await bot.session.close()
+        finally:
+            await close_db()
 
 
 if __name__ == "__main__":
