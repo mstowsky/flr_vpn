@@ -18,6 +18,11 @@ env/
 # IDE
 .idea/
 
+# Python package build artifacts
+*.egg-info/
+build/
+dist/
+
 # Local database and backups
 *.db
 *.sqlite
