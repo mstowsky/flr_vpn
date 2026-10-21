@@ -1,11 +1,13 @@
 import logging
 
+from datetime import timezone
+
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
-from app.config import ADMIN_TELEGRAM_ID
+from app.config import ADMIN_TELEGRAM_ID, DISPLAY_TIMEZONE
 from app.services.provisioning import (
     complete_provisioning_task,
     fail_provisioning_task,
@@ -127,7 +129,7 @@ async def tasks_command(message: Message) -> None:
                 f"Статус: {task.status}\n"
                 f"{user_info}\n"
                 f"Подписка ID: {task.subscription_id or 'не указана'}\n"
-                f"Создана: {task.created_at:%d.%m.%Y %H:%M}\n"
+                f"Создана: {task.created_at.replace(tzinfo=timezone.utc).astimezone(DISPLAY_TIMEZONE):%d.%m.%Y %H:%M}\n"
             )
 
     response = "\n".join(lines)
