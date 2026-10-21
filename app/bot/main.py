@@ -119,7 +119,7 @@ async def tasks_command(message: Message) -> None:
             }
 
             lines.append(
-                f"Задача #{task.id}\n"
+                f"Задача id: {task.id}\n"
                 f"Тип: {task_types.get(task.task_type, task.task_type)}\n"
                 f"Статус: {task.status}\n"
                 f"{user_info}\n"
