@@ -16,6 +16,7 @@ from app.services.provisioning import (
 )
 from app.database import async_session_factory
 from app.models.user import User
+from app.services.subscriptions import activate_trial_period
 from app.services.users import get_or_create_user
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,50 @@ async def cmd_start(message: Message) -> None:
         )
 
     await message.answer(text)
+
+
+@dp.message(Command("trial"))
+async def trial_command(message: Message) -> None:
+    telegram_user = message.from_user
+
+    if telegram_user is None:
+        await message.answer(
+            "Не удалось определить пользователя Telegram."
+        )
+        return
+
+    async with async_session_factory() as session:
+        user, _ = await get_or_create_user(
+            session,
+            telegram_id=telegram_user.id,
+            username=telegram_user.username,
+            first_name=telegram_user.first_name,
+        )
+
+        try:
+            subscription = await activate_trial_period(
+                session,
+                user_id=user.id,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    logger.info(
+        "Активирован пробный период: user_id=%s, subscription_id=%s",
+        user.id,
+        subscription.id,
+    )
+
+    await message.answer(
+        "Пробный период активирован! 🎉\n\n"
+        "Срок: 3 дня\n"
+        "Устройства: 1\n"
+        "Трафик: 5 ГБ\n\n"
+        "Задача на создание VPN-доступа добавлена в очередь. "
+        "Доступ будет подготовлен вручную. "
+        "После настройки ты получишь дальнейшие инструкции."
+    )
 
 
 @dp.message(Command("tasks"))
