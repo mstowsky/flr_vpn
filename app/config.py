@@ -1,10 +1,26 @@
 import os
 
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+_display_timezone = os.getenv("DISPLAY_TIMEZONE")
+
+if not _display_timezone:
+    raise RuntimeError(
+        "DISPLAY_TIMEZONE не найден. "
+        "Укажи часовой пояс в файле .env."
+    )
+
+try:
+    DISPLAY_TIMEZONE = ZoneInfo(_display_timezone)
+except (KeyError, ValueError) as exc:
+    raise RuntimeError(
+        "DISPLAY_TIMEZONE содержит некорректный часовой пояс."
+    ) from exc
 
 if not BOT_TOKEN:
     raise RuntimeError(

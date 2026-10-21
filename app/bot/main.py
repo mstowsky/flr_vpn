@@ -14,8 +14,6 @@ from app.services.provisioning import (
 )
 from app.database import async_session_factory
 from app.models.user import User
-from app.models.subscription import Subscription
-from app.models.plan import Plan
 from app.services.users import get_or_create_user
 
 logger = logging.getLogger(__name__)
