@@ -49,21 +49,36 @@ async def test_create_plan_with_valid_values(session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("price", [0, -1])
-async def test_plan_rejects_zero_or_negative_price(session, price):
+async def test_plan_allows_zero_price(session):
+    """Бесплатный тариф разрешён для пробного периода."""
+    plan = Plan(
+        name="Пробный период",
+        price_rub=0,
+        duration_days=3,
+        max_devices=1,
+        traffic_limit_gb=5,
+    )
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
+
+    assert plan.id is not None
+    assert plan.price_rub == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_rejects_negative_price(session):
+    """Отрицательная цена тарифа запрещена."""
     plan = Plan(
         name="Тестовый",
-        price_rub=price,
+        price_rub=-1,
         duration_days=30,
         max_devices=3,
     )
-
     session.add(plan)
 
     with pytest.raises(IntegrityError):
         await session.commit()
-
-    await session.rollback()
 
 
 @pytest.mark.asyncio

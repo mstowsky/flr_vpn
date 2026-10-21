@@ -2,10 +2,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from sqlalchemy import select
+
 from app.models.plan import Plan
+from app.models.provisioning_task import ProvisioningTask
 from app.models.subscription import Subscription
 from app.models.user import User
 from app.services.subscriptions import (
+    activate_trial_period,
     create_subscription,
     get_user_subscription,
     get_user_subscription_info,
@@ -507,3 +511,90 @@ async def test_get_user_subscription_info_returns_none_if_expired(
     )
 
     assert info is None
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_creates_subscription_and_task(
+    session,
+    user,
+):
+    """Пробный период создаёт подписку, тариф и задачу выдачи."""
+    now = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+
+    subscription = await activate_trial_period(
+        session,
+        user_id=user.id,
+        now=now,
+    )
+
+    await session.refresh(user)
+
+    assert subscription.user_id == user.id
+    assert subscription.starts_at == as_utc_naive(now)
+    assert subscription.expires_at == as_utc_naive(
+        now + timedelta(days=3)
+    )
+    assert subscription.status == "active"
+    assert user.has_used_trial is True
+
+    plan_result = await session.execute(
+        select(Plan).where(Plan.id == subscription.plan_id)
+    )
+    trial_plan = plan_result.scalar_one()
+
+    assert trial_plan.name == "Пробный период"
+    assert trial_plan.price_rub == 0
+    assert trial_plan.duration_days == 3
+    assert trial_plan.max_devices == 1
+    assert trial_plan.traffic_limit_gb == 5
+
+    task_result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.user_id == user.id
+        )
+    )
+    tasks = task_result.scalars().all()
+
+    assert len(tasks) == 1
+    assert tasks[0].task_type == "create"
+    assert tasks[0].status == "pending"
+    assert tasks[0].subscription_id == subscription.id
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_cannot_be_used_twice(
+    session,
+    user,
+):
+    """Повторная активация пробного периода запрещена."""
+    await activate_trial_period(session, user_id=user.id)
+
+    with pytest.raises(ValueError, match="уже использован"):
+        await activate_trial_period(session, user_id=user.id)
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_rejects_active_subscription(
+    session,
+    user,
+    plan,
+):
+    """Пробный период нельзя активировать при действующей подписке."""
+    await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    with pytest.raises(ValueError, match="действующей подписке"):
+        await activate_trial_period(session, user_id=user.id)
+
+    await session.refresh(user)
+    assert user.has_used_trial is False
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_rejects_missing_user(session):
+    """Для несуществующего пользователя пробный период не создаётся."""
+    with pytest.raises(ValueError, match="не найден"):
+        await activate_trial_period(session, user_id=999999)

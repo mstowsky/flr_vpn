@@ -4,8 +4,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.plan import Plan
+from app.models.user import User
 from app.models.subscription import Subscription
 
+TRIAL_PLAN_NAME = "Пробный период"
+TRIAL_DURATION_DAYS = 3
+TRIAL_MAX_DEVICES = 1
+TRIAL_TRAFFIC_LIMIT_GB = 5
+TRIAL_PRICE_RUB = 0
 
 def _as_utc(value: datetime) -> datetime:
     """Приводит дату к UTC, учитывая SQLite без timezone."""
@@ -212,3 +218,102 @@ async def get_user_subscription_info(
         "expires_at": expires_at,
         "remaining_days": remaining_days,
     }
+
+
+async def activate_trial_period(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    now: datetime | None = None,
+) -> Subscription:
+    """Активирует бесплатный пробный период и создаёт задачу выдачи VPN."""
+
+    from app.services.provisioning import create_provisioning_task
+
+    current_time = _as_utc(now or datetime.now(timezone.utc))
+
+    user_result = await session.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = user_result.scalar_one_or_none()
+
+    if user is None:
+        raise ValueError(f"Пользователь с ID {user_id} не найден.")
+
+    if user.has_used_trial:
+        raise ValueError("Пробный период уже использован.")
+
+    current_subscription = await get_user_subscription(
+        session,
+        user_id,
+        now=current_time,
+    )
+
+    if current_subscription is not None:
+        raise ValueError(
+            "Нельзя активировать пробный период при действующей подписке."
+        )
+
+    try:
+        # Ищем тариф пробного периода или создаём его.
+        plan_result = await session.execute(
+            select(Plan).where(Plan.name == TRIAL_PLAN_NAME)
+        )
+        trial_plan = plan_result.scalar_one_or_none()
+
+        if trial_plan is None:
+            trial_plan = Plan(
+                name=TRIAL_PLAN_NAME,
+                price_rub=TRIAL_PRICE_RUB,
+                duration_days=TRIAL_DURATION_DAYS,
+                max_devices=TRIAL_MAX_DEVICES,
+                traffic_limit_gb=TRIAL_TRAFFIC_LIMIT_GB,
+                is_active=True,
+            )
+            session.add(trial_plan)
+            await session.flush()
+        else:
+            # Не используем тариф с тем же названием,
+            # если его параметры не соответствуют пробному периоду.
+            expected_settings = (
+                trial_plan.price_rub == TRIAL_PRICE_RUB
+                and trial_plan.duration_days == TRIAL_DURATION_DAYS
+                and trial_plan.max_devices == TRIAL_MAX_DEVICES
+                and trial_plan.traffic_limit_gb == TRIAL_TRAFFIC_LIMIT_GB
+            )
+            if not expected_settings or not trial_plan.is_active:
+                raise ValueError(
+                    "Тариф пробного периода имеет неверные параметры "
+                    "или неактивен."
+                )
+
+        subscription = await create_subscription(
+            session,
+            user_id=user_id,
+            plan_id=trial_plan.id,
+            now=current_time,
+            commit=False,
+        )
+
+        # Получаем ID подписки для задачи ручной выдачи доступа.
+        await session.flush()
+
+        await create_provisioning_task(
+            session,
+            user_id=user_id,
+            task_type="create",
+            subscription_id=subscription.id,
+            commit=False,
+        )
+
+        # Флаг и подписка сохраняются в одной транзакции.
+        user.has_used_trial = True
+
+        await session.commit()
+        await session.refresh(subscription)
+
+    except Exception:
+        await session.rollback()
+        raise
+
+    return subscription

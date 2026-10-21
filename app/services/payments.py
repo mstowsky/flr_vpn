@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.payment import Payment
 from app.models.plan import Plan
+from app.models.user import User
 
 
 async def create_payment(
@@ -182,7 +183,13 @@ async def process_successful_payment(
             commit=False,
         )
 
-        # Платёж, подписка и задача фиксируются вместе.
+        # Успешная платная подписка лишает пользователя права на пробный период.
+        if payment.amount_rub > 0:
+            user = await session.get(User, payment.user_id)
+            if user is not None:
+                user.has_used_trial = True
+
+        # Платёж, подписка, задача и флаг фиксируются вместе.
         payment.status = "succeeded"
 
         await session.commit()

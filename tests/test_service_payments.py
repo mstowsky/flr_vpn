@@ -370,6 +370,40 @@ async def test_process_successful_payment_creates_subscription(
 
 
 @pytest.mark.asyncio
+async def test_successful_payment_marks_trial_as_used(
+    session: AsyncSession,
+) -> None:
+    """Успешная платная подписка отключает право на пробный период."""
+    user = await create_test_user(
+        session,
+        telegram_id=20008,
+    )
+    plan = await create_test_plan(
+        session,
+        price_rub=299,
+    )
+
+    assert user.has_used_trial is False
+
+    payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    result = await process_successful_payment(
+        session,
+        payment.id,
+    )
+
+    assert result is not None
+    assert result.status == "succeeded"
+
+    await session.refresh(user)
+    assert user.has_used_trial is True
+
+
+@pytest.mark.asyncio
 async def test_process_successful_payment_is_idempotent(
     session: AsyncSession,
 ) -> None:
@@ -813,6 +847,9 @@ async def test_successful_payment_rolls_back_provisioning_task_error(
 
     await session.refresh(payment)
     assert payment.status == "pending"
+
+    await session.refresh(user)
+    assert user.has_used_trial is False
 
     subscriptions_result = await session.execute(
         select(func.count())
