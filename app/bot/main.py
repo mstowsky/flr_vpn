@@ -6,7 +6,12 @@ from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
 from app.config import ADMIN_TELEGRAM_ID
-from app.services.provisioning import complete_provisioning_task, get_pending_provisioning_tasks
+from app.services.provisioning import (
+    complete_provisioning_task,
+    fail_provisioning_task,
+    get_pending_provisioning_tasks,
+    retry_provisioning_task,
+)
 from app.database import async_session_factory
 from app.models.user import User
 from app.models.subscription import Subscription
@@ -184,6 +189,123 @@ async def complete_command(
 
     await message.answer(
         f"Задача #{task.id} отмечена выполненной."
+    )
+
+
+@dp.message(Command("fail"))
+async def fail_command(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    if message.from_user is None:
+        return
+
+    if message.from_user.id != ADMIN_TELEGRAM_ID:
+        await message.answer("У вас нет доступа к этой команде.")
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID задачи и причину ошибки.\n"
+            "Пример: /fail 12 Не удалось найти клиента в H UI"
+        )
+        return
+
+    parts = command.args.strip().split(maxsplit=1)
+
+    try:
+        task_id = int(parts[0])
+    except ValueError:
+        await message.answer(
+            "ID задачи должен быть целым числом.\n"
+            "Пример: /fail 12 Не удалось найти клиента"
+        )
+        return
+
+    if task_id <= 0:
+        await message.answer(
+            "ID задачи должен быть положительным числом."
+        )
+        return
+
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer(
+            "Укажи причину ошибки.\n"
+            "Пример: /fail 12 Не удалось найти клиента в H UI"
+        )
+        return
+
+    reason = parts[1].strip()
+
+    async with async_session_factory() as session:
+        try:
+            task = await fail_provisioning_task(
+                session,
+                task_id=task_id,
+                result_message=(
+                    f"Ошибка: {reason}. "
+                    f"Администратор Telegram ID "
+                    f"{message.from_user.id}"
+                ),
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    await message.answer(
+        f"Задача #{task.id} отмечена как неудачная.\n"
+        f"Причина: {reason}\n"
+        f"Для повторной попытки используй /retry {task.id}"
+    )
+
+
+@dp.message(Command("retry"))
+async def retry_command(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    if message.from_user is None:
+        return
+
+    if message.from_user.id != ADMIN_TELEGRAM_ID:
+        await message.answer("У вас нет доступа к этой команде.")
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID неудачной задачи.\n"
+            "Пример: /retry 12"
+        )
+        return
+
+    try:
+        task_id = int(command.args.strip())
+    except ValueError:
+        await message.answer(
+            "ID задачи должен быть целым числом.\n"
+            "Пример: /retry 12"
+        )
+        return
+
+    if task_id <= 0:
+        await message.answer(
+            "ID задачи должен быть положительным числом."
+        )
+        return
+
+    async with async_session_factory() as session:
+        try:
+            task = await retry_provisioning_task(
+                session,
+                task_id=task_id,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    await message.answer(
+        f"Задача #{task.id} возвращена в очередь.\n"
+        "Проверь очередь командой /tasks."
     )
 
 
