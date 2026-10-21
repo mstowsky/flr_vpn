@@ -96,3 +96,64 @@ async def test_create_plan_saves_plan_to_database(
     saved_plan = result.scalar_one()
 
     assert saved_plan.name == "Новый тариф"
+
+
+@pytest.mark.asyncio
+async def test_get_active_plans_returns_plans_ordered_by_duration(
+    session: AsyncSession,
+) -> None:
+    """Активные тарифы возвращаются по возрастанию срока действия."""
+    from app.services.plans import get_active_plans
+
+    await create_plan(
+        session,
+        name="Тариф на 3 месяца",
+        price_rub=699,
+        duration_days=90,
+        max_devices=2,
+    )
+    await create_plan(
+        session,
+        name="Тариф на 1 месяц",
+        price_rub=299,
+        duration_days=30,
+        max_devices=2,
+    )
+    await create_plan(
+        session,
+        name="Тариф на 6 месяцев",
+        price_rub=1299,
+        duration_days=180,
+        max_devices=5,
+    )
+
+    plans = await get_active_plans(session)
+
+    assert [plan.duration_days for plan in plans] == [30, 90, 180]
+
+
+@pytest.mark.asyncio
+async def test_get_active_plans_returns_empty_list_when_no_active_plans(
+    session: AsyncSession,
+) -> None:
+    """Если активных тарифов нет, возвращается пустой список."""
+    from app.services.plans import get_active_plans
+
+    await create_plan(
+        session,
+        name="Неактивный тариф",
+        price_rub=299,
+        duration_days=30,
+        max_devices=2,
+    )
+
+    result = await session.execute(
+        select(Plan).where(Plan.name == "Неактивный тариф")
+    )
+    plan = result.scalar_one()
+    plan.is_active = False
+    await session.commit()
+
+    plans = await get_active_plans(session)
+
+    assert plans == []

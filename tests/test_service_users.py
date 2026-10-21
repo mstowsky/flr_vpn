@@ -107,3 +107,49 @@ async def test_different_telegram_ids_create_different_users(
         select(func.count()).select_from(User)
     )
     assert result.scalar_one() == 2
+
+
+@pytest.mark.asyncio
+async def test_create_user_without_username(
+    session: AsyncSession,
+) -> None:
+    user, is_new = await get_or_create_user(
+        session,
+        telegram_id=100006,
+        username=None,
+        first_name="User Without Username",
+    )
+
+    assert is_new is True
+    assert user.id is not None
+    assert user.username is None
+    assert user.first_name == "User Without Username"
+
+
+@pytest.mark.asyncio
+async def test_existing_user_username_can_be_cleared(
+    session: AsyncSession,
+) -> None:
+    await get_or_create_user(
+        session,
+        telegram_id=100007,
+        username="old_username",
+        first_name="Test User",
+    )
+
+    user, is_new = await get_or_create_user(
+        session,
+        telegram_id=100007,
+        username=None,
+        first_name="Test User",
+    )
+
+    assert is_new is False
+    assert user.username is None
+
+    result = await session.execute(
+        select(User).where(User.telegram_id == 100007)
+    )
+    saved_user = result.scalar_one()
+
+    assert saved_user.username is None
