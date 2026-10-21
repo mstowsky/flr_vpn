@@ -1,16 +1,36 @@
-
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
+from app.config import ADMIN_TELEGRAM_ID
+from app.services.provisioning import get_pending_provisioning_tasks
 from app.database import async_session_factory
+from app.models.user import User
+from app.models.subscription import Subscription
+from app.models.plan import Plan
 from app.services.users import get_or_create_user
 
 logger = logging.getLogger(__name__)
 
 dp = Dispatcher()
+
+
+@dp.message(Command("admin"))
+async def admin_command(message: Message) -> None:
+    if message.from_user is None:
+        return
+
+    if message.from_user.id != ADMIN_TELEGRAM_ID:
+        await message.answer("У вас нет доступа к этой команде.")
+        return
+
+    await message.answer(
+        "Панель администратора\n\n"
+        "Доступ подтверждён. Интерфейс обработки задач "
+        "будет добавлен следующим шагом."
+    )
 
 
 @dp.message(CommandStart())
@@ -51,6 +71,68 @@ async def cmd_start(message: Message) -> None:
         )
 
     await message.answer(text)
+
+
+@dp.message(Command("tasks"))
+async def tasks_command(message: Message) -> None:
+    if message.from_user is None:
+        return
+
+    if message.from_user.id != ADMIN_TELEGRAM_ID:
+        await message.answer("У вас нет доступа к этой команде.")
+        return
+
+    async with async_session_factory() as session:
+        tasks = await get_pending_provisioning_tasks(session)
+
+        if not tasks:
+            await message.answer(
+                "Очередь задач пуста. Ожидающих задач нет."
+            )
+            return
+
+        lines = ["📋 Ожидающие задачи VPN-доступа:\n"]
+
+        for task in tasks:
+            user = await session.get(User, task.user_id)
+
+            if user is None:
+                user_info = f"ID пользователя в БД: {task.user_id}"
+            else:
+                user_info = (
+                    f"Telegram ID: {user.telegram_id}\n"
+                    f"Имя: {user.first_name or 'не указано'}\n"
+                    f"Username: @{user.username}"
+                    if user.username
+                    else (
+                        f"Telegram ID: {user.telegram_id}\n"
+                        f"Имя: {user.first_name or 'не указано'}\n"
+                        "Username: не указан"
+                    )
+                )
+
+            task_types = {
+                "create": "Создание доступа",
+                "extend": "Продление доступа",
+                "disable": "Отключение доступа",
+            }
+
+            lines.append(
+                f"Задача #{task.id}\n"
+                f"Тип: {task_types.get(task.task_type, task.task_type)}\n"
+                f"Статус: {task.status}\n"
+                f"{user_info}\n"
+                f"Подписка ID: {task.subscription_id or 'не указана'}\n"
+                f"Создана: {task.created_at:%d.%m.%Y %H:%M}\n"
+            )
+
+    response = "\n".join(lines)
+
+    # Telegram ограничивает длину одного сообщения.
+    # Разбиваем длинную очередь на части.
+    max_length = 3500
+    for start in range(0, len(response), max_length):
+        await message.answer(response[start:start + max_length])
 
 
 @dp.message()
