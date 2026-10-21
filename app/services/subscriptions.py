@@ -46,6 +46,7 @@ async def create_subscription(
     user_id: int,
     plan_id: int,
     now: datetime | None = None,
+    commit: bool = True,
 ) -> Subscription:
     """Создаёт подписку на активный тариф."""
 
@@ -77,8 +78,9 @@ async def create_subscription(
     )
 
     session.add(subscription)
-    await session.commit()
-    await session.refresh(subscription)
+    if commit:
+        await session.commit()
+        await session.refresh(subscription)
 
     return subscription
 
@@ -89,6 +91,7 @@ async def extend_subscription(
     user_id: int,
     plan_id: int,
     now: datetime | None = None,
+    commit: bool = True,
 ) -> Subscription:
     """Продлевает действующую подписку или создаёт новый период."""
 
@@ -121,6 +124,7 @@ async def extend_subscription(
             user_id=user_id,
             plan_id=plan_id,
             now=current_time,
+            commit=commit,
         )
 
     current_expiry = _as_utc(subscription.expires_at)
@@ -133,8 +137,9 @@ async def extend_subscription(
     subscription.plan_id = plan.id
     subscription.updated_at = current_time
 
-    await session.commit()
-    await session.refresh(subscription)
+    if commit:
+        await session.commit()
+        await session.refresh(subscription)
 
     return subscription
 

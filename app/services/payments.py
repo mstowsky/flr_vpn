@@ -68,7 +68,6 @@ async def get_user_payments(
     return list(result.scalars().all())
 
 
-
 async def update_payment_status(
     session: AsyncSession,
     payment_id: int,
@@ -115,5 +114,61 @@ async def update_payment_status(
 
     await session.commit()
     await session.refresh(payment)
+
+    return payment
+
+
+async def process_successful_payment(
+        session: AsyncSession,
+        payment_id: int,
+) -> Payment | None:
+    """Подтверждает оплату и активирует или продлевает подписку.
+
+    Изменение статуса платежа и изменение подписки фиксируются
+    одной транзакцией.
+
+    Возвращает:
+        Payment — если платёж успешно обработан или уже обработан.
+        None — если платёж с указанным ID не найден.
+
+    Raises:
+        ValueError — если платёж имеет недопустимый статус.
+    """
+    from app.services.subscriptions import extend_subscription
+
+    payment = await get_payment_by_id(session, payment_id)
+
+    if payment is None:
+        return None
+
+    # Повторная обработка не должна продлевать подписку ещё раз.
+    if payment.status == "succeeded":
+        return payment
+
+    # Обрабатывать как успешные можно только ожидающие платежи.
+    if payment.status != "pending":
+        raise ValueError(
+            f"Нельзя подтвердить платёж со статусом "
+            f"'{payment.status}'."
+        )
+
+    try:
+        # Создаём или продлеваем подписку без отдельного commit.
+        await extend_subscription(
+            session,
+            user_id=payment.user_id,
+            plan_id=payment.plan_id,
+            commit=False,
+        )
+
+        # Помечаем платёж успешным в той же транзакции.
+        payment.status = "succeeded"
+
+        await session.commit()
+        await session.refresh(payment)
+
+    except Exception:
+        await session.rollback()
+        raise
 
     return payment
