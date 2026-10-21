@@ -7,8 +7,10 @@ from app.models.subscription import Subscription
 from app.models.user import User
 from app.services.subscriptions import (
     create_subscription,
-    extend_subscription,
     get_user_subscription,
+    expire_subscriptions,
+    extend_subscription,
+
 )
 
 
@@ -322,3 +324,86 @@ async def test_extend_subscription_for_inactive_plan(
             plan_id=inactive_plan.id,
             now=now,
         )
+
+
+@pytest.mark.asyncio
+async def test_expire_subscriptions_updates_expired_records(
+    session,
+    user,
+    plan,
+):
+    """Истёкшая подписка переводится в статус expired."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    subscription = Subscription(
+        user_id=user.id,
+        plan_id=plan.id,
+        starts_at=as_utc_naive(now - timedelta(days=31)),
+        expires_at=as_utc_naive(now),
+        status="active",
+    )
+    session.add(subscription)
+    await session.commit()
+    await session.refresh(subscription)
+
+    count = await expire_subscriptions(session, now=now)
+
+    await session.refresh(subscription)
+
+    assert count == 1
+    assert subscription.status == "expired"
+    assert subscription.updated_at == as_utc_naive(now)
+
+
+@pytest.mark.asyncio
+async def test_expire_subscriptions_keeps_active_records(
+    session,
+    user,
+    plan,
+):
+    """Подписка с будущим сроком действия остаётся активной."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    subscription = Subscription(
+        user_id=user.id,
+        plan_id=plan.id,
+        starts_at=as_utc_naive(now),
+        expires_at=as_utc_naive(now + timedelta(days=30)),
+        status="active",
+    )
+    session.add(subscription)
+    await session.commit()
+
+    count = await expire_subscriptions(session, now=now)
+
+    await session.refresh(subscription)
+
+    assert count == 0
+    assert subscription.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_expire_subscriptions_ignores_non_active_records(
+    session,
+    user,
+    plan,
+):
+    """Отменённые подписки не изменяются."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    subscription = Subscription(
+        user_id=user.id,
+        plan_id=plan.id,
+        starts_at=as_utc_naive(now - timedelta(days=1)),
+        expires_at=as_utc_naive(now),
+        status="cancelled",
+    )
+    session.add(subscription)
+    await session.commit()
+
+    count = await expire_subscriptions(session, now=now)
+
+    await session.refresh(subscription)
+
+    assert count == 0
+    assert subscription.status == "cancelled"

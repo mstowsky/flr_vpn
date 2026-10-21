@@ -134,3 +134,33 @@ async def extend_subscription(
     await session.refresh(subscription)
 
     return subscription
+
+
+async def expire_subscriptions(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Переводит истёкшие активные подписки в статус expired."""
+
+    current_time = _as_utc(
+        now or datetime.now(timezone.utc)
+    )
+
+    result = await session.execute(
+        select(Subscription).where(
+            Subscription.status == "active",
+            Subscription.expires_at <= current_time,
+        )
+    )
+
+    subscriptions = result.scalars().all()
+
+    for subscription in subscriptions:
+        subscription.status = "expired"
+        subscription.updated_at = current_time
+
+    if subscriptions:
+        await session.commit()
+
+    return len(subscriptions)
