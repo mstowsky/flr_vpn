@@ -16,6 +16,8 @@ from app.services.provisioning import (
 )
 from app.database import async_session_factory
 from app.models.user import User
+from app.models.plan import Plan
+from app.models.subscription import Subscription
 from app.services.subscriptions import activate_trial_period
 from app.services.users import get_or_create_user
 
@@ -162,6 +164,23 @@ async def tasks_command(message: Message) -> None:
                     )
                 )
 
+            subscription_name = "не указана"
+
+            if task.subscription_id is not None:
+                subscription = await session.get(
+                    Subscription,
+                    task.subscription_id,
+                )
+
+                if subscription is not None:
+                    plan = await session.get(
+                        Plan,
+                        subscription.plan_id,
+                    )
+
+                    if plan is not None:
+                        subscription_name = plan.name
+
             task_types = {
                 "create": "Создание доступа",
                 "extend": "Продление доступа",
@@ -173,6 +192,7 @@ async def tasks_command(message: Message) -> None:
                 f"Тип: {task_types.get(task.task_type, task.task_type)}\n"
                 f"Статус: {task.status}\n"
                 f"{user_info}\n"
+                f"Название подписки: {subscription_name}\n"
                 f"Подписка ID: {task.subscription_id or 'не указана'}\n"
                 f"Создана: {task.created_at.replace(tzinfo=timezone.utc).astimezone(DISPLAY_TIMEZONE):%d.%m.%Y %H:%M}\n"
             )
