@@ -18,51 +18,55 @@ def as_utc_naive(value: datetime) -> datetime:
 
 
 @pytest.fixture
-async def user(db_session):
+async def user(session):
     """Создаёт пользователя для тестов подписок."""
     user = User(
         telegram_id=123456789,
         username="test_user",
     )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
     return user
 
 
 @pytest.fixture
-async def plan(db_session):
+async def plan(session):
     """Создаёт активный тариф на 30 дней."""
     plan = Plan(
         name="Тестовый тариф",
-        price=199,
+        price_rub=199,
         duration_days=30,
+        max_devices=3,
+        traffic_limit_gb=None,
         is_active=True,
     )
-    db_session.add(plan)
-    await db_session.commit()
-    await db_session.refresh(plan)
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
     return plan
 
 
 @pytest.fixture
-async def inactive_plan(db_session):
+async def inactive_plan(session):
     """Создаёт неактивный тариф."""
     plan = Plan(
         name="Неактивный тариф",
-        price=199,
+        price_rub=199,
         duration_days=30,
+        max_devices=3,
+        traffic_limit_gb=None,
         is_active=False,
     )
-    db_session.add(plan)
-    await db_session.commit()
-    await db_session.refresh(plan)
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
     return plan
 
 
 @pytest.mark.asyncio
 async def test_create_subscription_for_active_plan(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -70,7 +74,7 @@ async def test_create_subscription_for_active_plan(
     now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 
     subscription = await create_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now,
@@ -88,7 +92,7 @@ async def test_create_subscription_for_active_plan(
 
 @pytest.mark.asyncio
 async def test_create_subscription_for_inactive_plan(
-    db_session,
+    session,
     user,
     inactive_plan,
 ):
@@ -97,7 +101,7 @@ async def test_create_subscription_for_inactive_plan(
 
     with pytest.raises(ValueError, match="не найден"):
         await create_subscription(
-            db_session,
+            session,
             user_id=user.id,
             plan_id=inactive_plan.id,
             now=now,
@@ -106,7 +110,7 @@ async def test_create_subscription_for_inactive_plan(
 
 @pytest.mark.asyncio
 async def test_create_subscription_for_missing_plan(
-    db_session,
+    session,
     user,
 ):
     """Создание подписки на несуществующий тариф вызывает ошибку."""
@@ -114,7 +118,7 @@ async def test_create_subscription_for_missing_plan(
 
     with pytest.raises(ValueError, match="не найден"):
         await create_subscription(
-            db_session,
+            session,
             user_id=user.id,
             plan_id=999999,
             now=now,
@@ -123,7 +127,7 @@ async def test_create_subscription_for_missing_plan(
 
 @pytest.mark.asyncio
 async def test_get_user_subscription_returns_active_subscription(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -131,13 +135,13 @@ async def test_get_user_subscription_returns_active_subscription(
     now = datetime.now(timezone.utc)
 
     subscription = await create_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now,
     )
 
-    result = await get_user_subscription(db_session, user.id)
+    result = await get_user_subscription(session, user.id)
 
     assert result is not None
     assert result.id == subscription.id
@@ -145,18 +149,18 @@ async def test_get_user_subscription_returns_active_subscription(
 
 @pytest.mark.asyncio
 async def test_get_user_subscription_returns_none_if_missing(
-    db_session,
+    session,
     user,
 ):
     """Если у пользователя нет подписки, возвращается None."""
-    result = await get_user_subscription(db_session, user.id)
+    result = await get_user_subscription(session, user.id)
 
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_user_subscription_ignores_expired_subscription(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -171,17 +175,17 @@ async def test_get_user_subscription_ignores_expired_subscription(
         expires_at=as_utc_naive(expired_at),
         status="active",
     )
-    db_session.add(subscription)
-    await db_session.commit()
+    session.add(subscription)
+    await session.commit()
 
-    result = await get_user_subscription(db_session, user.id)
+    result = await get_user_subscription(session, user.id)
 
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_get_user_subscription_ignores_cancelled_subscription(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -195,17 +199,17 @@ async def test_get_user_subscription_ignores_cancelled_subscription(
         expires_at=as_utc_naive(now + timedelta(days=29)),
         status="cancelled",
     )
-    db_session.add(subscription)
-    await db_session.commit()
+    session.add(subscription)
+    await session.commit()
 
-    result = await get_user_subscription(db_session, user.id)
+    result = await get_user_subscription(session, user.id)
 
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_extend_subscription_from_current_expiry(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -213,7 +217,7 @@ async def test_extend_subscription_from_current_expiry(
     now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 
     original = await create_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now,
@@ -221,7 +225,7 @@ async def test_extend_subscription_from_current_expiry(
     original_expiry = original.expires_at.replace(tzinfo=timezone.utc)
 
     extended = await extend_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now + timedelta(days=5),
@@ -236,7 +240,7 @@ async def test_extend_subscription_from_current_expiry(
 
 @pytest.mark.asyncio
 async def test_extend_expired_subscription_starts_new_period(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -250,12 +254,12 @@ async def test_extend_expired_subscription_starts_new_period(
         expires_at=as_utc_naive(now - timedelta(days=10)),
         status="active",
     )
-    db_session.add(original)
-    await db_session.commit()
-    await db_session.refresh(original)
+    session.add(original)
+    await session.commit()
+    await session.refresh(original)
 
     extended = await extend_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now,
@@ -270,7 +274,7 @@ async def test_extend_expired_subscription_starts_new_period(
     )
     assert extended.status == "active"
 
-    await db_session.refresh(original)
+    await session.refresh(original)
     assert original.expires_at == as_utc_naive(
         now - timedelta(days=10)
     )
@@ -278,7 +282,7 @@ async def test_extend_expired_subscription_starts_new_period(
 
 @pytest.mark.asyncio
 async def test_extend_subscription_creates_subscription_if_missing(
-    db_session,
+    session,
     user,
     plan,
 ):
@@ -286,7 +290,7 @@ async def test_extend_subscription_creates_subscription_if_missing(
     now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 
     subscription = await extend_subscription(
-        db_session,
+        session,
         user_id=user.id,
         plan_id=plan.id,
         now=now,
@@ -304,7 +308,7 @@ async def test_extend_subscription_creates_subscription_if_missing(
 
 @pytest.mark.asyncio
 async def test_extend_subscription_for_inactive_plan(
-    db_session,
+    session,
     user,
     inactive_plan,
 ):
@@ -312,4 +316,9 @@ async def test_extend_subscription_for_inactive_plan(
     now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 
     with pytest.raises(ValueError, match="не найден"):
-        await extend_subscription
+        await extend_subscription(
+            session,
+            user_id=user.id,
+            plan_id=inactive_plan.id,
+            now=now,
+        )
