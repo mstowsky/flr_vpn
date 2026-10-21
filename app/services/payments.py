@@ -119,33 +119,29 @@ async def update_payment_status(
 
 
 async def process_successful_payment(
-        session: AsyncSession,
-        payment_id: int,
+    session: AsyncSession,
+    payment_id: int,
 ) -> Payment | None:
-    """Подтверждает оплату и активирует или продлевает подписку.
+    """Подтверждает оплату, изменяет подписку и создаёт задачу VPN.
 
-    Изменение статуса платежа и изменение подписки фиксируются
-    одной транзакцией.
-
-    Возвращает:
-        Payment — если платёж успешно обработан или уже обработан.
-        None — если платёж с указанным ID не найден.
-
-    Raises:
-        ValueError — если платёж имеет недопустимый статус.
+    Все изменения выполняются в одной транзакции.
+    Повторная обработка успешного платежа безопасна.
     """
-    from app.services.subscriptions import extend_subscription
+    from app.services.provisioning import create_provisioning_task
+    from app.services.subscriptions import (
+        extend_subscription,
+        get_user_subscription,
+    )
 
     payment = await get_payment_by_id(session, payment_id)
 
     if payment is None:
         return None
 
-    # Повторная обработка не должна продлевать подписку ещё раз.
+    # Повторная обработка не должна создавать новую задачу.
     if payment.status == "succeeded":
         return payment
 
-    # Обрабатывать как успешные можно только ожидающие платежи.
     if payment.status != "pending":
         raise ValueError(
             f"Нельзя подтвердить платёж со статусом "
@@ -153,15 +149,40 @@ async def process_successful_payment(
         )
 
     try:
-        # Создаём или продлеваем подписку без отдельного commit.
-        await extend_subscription(
+        # Проверяем подписку ДО продления, чтобы правильно
+        # определить тип задачи.
+        current_subscription = await get_user_subscription(
+            session,
+            payment.user_id,
+        )
+
+        task_type = (
+            "extend"
+            if current_subscription is not None
+            else "create"
+        )
+
+        # Продлеваем подписку или создаём новую без commit.
+        subscription = await extend_subscription(
             session,
             user_id=payment.user_id,
             plan_id=payment.plan_id,
             commit=False,
         )
 
-        # Помечаем платёж успешным в той же транзакции.
+        # Для новой подписки нужен ID перед созданием задачи.
+        await session.flush()
+
+        # Создаём задачу в той же транзакции.
+        await create_provisioning_task(
+            session,
+            user_id=payment.user_id,
+            task_type=task_type,
+            subscription_id=subscription.id,
+            commit=False,
+        )
+
+        # Платёж, подписка и задача фиксируются вместе.
         payment.status = "succeeded"
 
         await session.commit()

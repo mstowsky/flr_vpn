@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.payment import Payment
 from app.models.plan import Plan
 from app.models.user import User
+from app.models.provisioning_task import ProvisioningTask
 from app.services.payments import (
     create_payment,
     get_payment_by_id,
@@ -689,3 +690,140 @@ async def test_successful_payment_rolls_back_when_subscription_extension_fails(
         assert old_subscription.expires_at == old_expiry.replace(
             tzinfo=None
         )
+
+
+@pytest.mark.asyncio
+async def test_successful_payment_creates_provisioning_task(
+    session: AsyncSession,
+) -> None:
+    """Первая оплата создаёт задачу create для новой подписки."""
+    user = await create_test_user(session, telegram_id=30001)
+    plan = await create_test_plan(session)
+
+    payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    await process_successful_payment(session, payment.id)
+
+    result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.user_id == user.id
+        )
+    )
+    tasks = result.scalars().all()
+
+    assert len(tasks) == 1
+    assert tasks[0].task_type == "create"
+    assert tasks[0].status == "pending"
+    assert tasks[0].subscription_id is not None
+
+
+@pytest.mark.asyncio
+async def test_successful_payment_creates_extend_task(
+    session: AsyncSession,
+) -> None:
+    """Повторная покупка при действующей подписке создаёт задачу extend."""
+    user = await create_test_user(session, telegram_id=30002)
+    plan = await create_test_plan(session)
+
+    first_payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+    await process_successful_payment(session, first_payment.id)
+
+    second_payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+    await process_successful_payment(session, second_payment.id)
+
+    result = await session.execute(
+        select(ProvisioningTask)
+        .where(ProvisioningTask.user_id == user.id)
+        .order_by(ProvisioningTask.id)
+    )
+    tasks = result.scalars().all()
+
+    assert len(tasks) == 2
+    assert [task.task_type for task in tasks] == ["create", "extend"]
+    assert all(task.status == "pending" for task in tasks)
+    assert tasks[0].subscription_id == tasks[1].subscription_id
+
+
+@pytest.mark.asyncio
+async def test_reprocessing_successful_payment_does_not_duplicate_task(
+    session: AsyncSession,
+) -> None:
+    """Повторная обработка платежа не создаёт вторую задачу."""
+    user = await create_test_user(session, telegram_id=30003)
+    plan = await create_test_plan(session)
+
+    payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    await process_successful_payment(session, payment.id)
+    await process_successful_payment(session, payment.id)
+
+    result = await session.execute(
+        select(func.count())
+        .select_from(ProvisioningTask)
+        .where(ProvisioningTask.user_id == user.id)
+    )
+
+    assert result.scalar_one() == 1
+
+
+@pytest.mark.asyncio
+async def test_successful_payment_rolls_back_provisioning_task_error(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """При ошибке создания задачи платёж и подписка откатываются."""
+    from app.models.subscription import Subscription
+
+    user = await create_test_user(session, telegram_id=30004)
+    user_id = user.id
+    plan = await create_test_plan(session)
+
+    payment = await create_payment(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    async def failing_create_task(*args, **kwargs):
+        raise RuntimeError("Ошибка создания задачи")
+
+    monkeypatch.setattr(
+        "app.services.provisioning.create_provisioning_task",
+        failing_create_task,
+    )
+
+    with pytest.raises(RuntimeError, match="Ошибка создания задачи"):
+        await process_successful_payment(session, payment.id)
+
+    await session.refresh(payment)
+    assert payment.status == "pending"
+
+    subscriptions_result = await session.execute(
+        select(func.count())
+        .select_from(Subscription)
+        .where(Subscription.user_id == user_id)
+    )
+    assert subscriptions_result.scalar_one() == 0
+
+    tasks_result = await session.execute(
+        select(func.count())
+        .select_from(ProvisioningTask)
+        .where(ProvisioningTask.user_id == user_id)
+    )
+    assert tasks_result.scalar_one() == 0
