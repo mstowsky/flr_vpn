@@ -17,7 +17,7 @@ class Plan(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "price_rub > 0",
+            "price_rub >= 0",
             name="ck_plans_price_rub_non_negative",
         ),
         CheckConstraint(
