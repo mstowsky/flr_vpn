@@ -224,9 +224,12 @@ async def test_subscription_error_rolls_back_payment_status(
     """Ошибка активации подписки не подтверждает платёж."""
     from app.services import subscriptions
 
+    # Сохраняем ID до возможного rollback транзакции.
+    user_id = user.id
+
     payment = await create_payment(
         session,
-        user_id=user.id,
+        user_id=user_id,
         plan_id=plan.id,
     )
     payment_id = payment.id
@@ -249,6 +252,7 @@ async def test_subscription_error_rolls_back_payment_status(
             payment_id,
         )
 
+    # Платёж должен остаться ожидающим.
     result = await session.execute(
         select(Payment).where(Payment.id == payment_id)
     )
@@ -256,9 +260,11 @@ async def test_subscription_error_rolls_back_payment_status(
 
     assert stored_payment.status == "pending"
 
+    # После rollback проверяем отсутствие подписки
+    # по сохранённому ID, не обращаясь к объекту user.
     result = await session.execute(
         select(Subscription).where(
-            Subscription.user_id == user.id
+            Subscription.user_id == user_id
         )
     )
     assert result.scalars().all() == []
