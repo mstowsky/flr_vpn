@@ -8,9 +8,9 @@ from app.models.user import User
 from app.services.subscriptions import (
     create_subscription,
     get_user_subscription,
+    get_user_subscription_info,
     expire_subscriptions,
     extend_subscription,
-
 )
 
 
@@ -407,3 +407,103 @@ async def test_expire_subscriptions_ignores_non_active_records(
 
     assert count == 0
     assert subscription.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_get_user_subscription_info_returns_details(
+    session,
+    user,
+    plan,
+):
+    """Информация о действующей подписке содержит нужные поля."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    subscription = await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now,
+    )
+
+    info = await get_user_subscription_info(
+        session,
+        user.id,
+        now=now,
+    )
+
+    assert info is not None
+    assert info["status"] == "active"
+    assert info["expires_at"] == datetime(
+        2026, 11, 20, 12, 0, tzinfo=timezone.utc
+    )
+    assert info["remaining_days"] == 30
+
+
+@pytest.mark.asyncio
+async def test_get_user_subscription_info_rounds_up_remaining_days(
+    session,
+    user,
+    plan,
+):
+    """Неполные сутки округляются вверх до одного дня."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now,
+    )
+
+    check_time = now + timedelta(days=29, hours=1)
+
+    info = await get_user_subscription_info(
+        session,
+        user.id,
+        now=check_time,
+    )
+
+    assert info is not None
+    assert info["remaining_days"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_user_subscription_info_returns_none_if_missing(
+    session,
+    user,
+):
+    """Без действующей подписки возвращается None."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    info = await get_user_subscription_info(
+        session,
+        user.id,
+        now=now,
+    )
+
+    assert info is None
+
+
+@pytest.mark.asyncio
+async def test_get_user_subscription_info_returns_none_if_expired(
+    session,
+    user,
+    plan,
+):
+    """Подписка с истёкшим сроком не возвращается."""
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+
+    await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now - timedelta(days=31),
+    )
+
+    info = await get_user_subscription_info(
+        session,
+        user.id,
+        now=now,
+    )
+
+    assert info is None

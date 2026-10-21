@@ -17,17 +17,19 @@ def _as_utc(value: datetime) -> datetime:
 async def get_user_subscription(
     session: AsyncSession,
     user_id: int,
+    *,
+    now: datetime | None = None,
 ) -> Subscription | None:
     """Возвращает последнюю действующую подписку пользователя."""
 
-    now = datetime.now(timezone.utc)
+    current_time = _as_utc(now or datetime.now(timezone.utc))
 
     result = await session.execute(
         select(Subscription)
         .where(
             Subscription.user_id == user_id,
             Subscription.status == "active",
-            Subscription.expires_at > now,
+            Subscription.expires_at > current_time,
         )
         .order_by(
             Subscription.expires_at.desc(),
@@ -110,6 +112,7 @@ async def extend_subscription(
     subscription = await get_user_subscription(
         session,
         user_id,
+        now=current_time,
     )
 
     if subscription is None:
@@ -164,3 +167,43 @@ async def expire_subscriptions(
         await session.commit()
 
     return len(subscriptions)
+
+
+async def get_user_subscription_info(
+    session: AsyncSession,
+    user_id: int,
+    *,
+    now: datetime | None = None,
+) -> dict[str, str | datetime | int] | None:
+    """
+    Возвращает информацию о действующей подписке пользователя.
+
+    Оставшиеся дни округляются вверх.
+    Если действующей подписки нет, возвращает None.
+    """
+
+    current_time = _as_utc(now or datetime.now(timezone.utc))
+
+    subscription = await get_user_subscription(
+        session,
+        user_id,
+        now=current_time,
+    )
+
+    if subscription is None:
+        return None
+
+    expires_at = _as_utc(subscription.expires_at)
+    remaining_seconds = (expires_at - current_time).total_seconds()
+
+    # Даже если осталось меньше суток, показываем 1 день.
+    remaining_days = max(
+        1,
+        int((remaining_seconds + 86_399) // 86_400),
+    )
+
+    return {
+        "status": subscription.status,
+        "expires_at": expires_at,
+        "remaining_days": remaining_days,
+    }
