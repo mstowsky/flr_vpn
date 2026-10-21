@@ -2,10 +2,11 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
+from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
 from app.config import ADMIN_TELEGRAM_ID
-from app.services.provisioning import get_pending_provisioning_tasks
+from app.services.provisioning import complete_provisioning_task, get_pending_provisioning_tasks
 from app.database import async_session_factory
 from app.models.user import User
 from app.models.subscription import Subscription
@@ -133,6 +134,57 @@ async def tasks_command(message: Message) -> None:
     max_length = 3500
     for start in range(0, len(response), max_length):
         await message.answer(response[start:start + max_length])
+
+
+@dp.message(Command("complete"))
+async def complete_command(
+        message: Message,
+        command: CommandObject,
+) -> None:
+    if message.from_user is None:
+        return
+
+    if message.from_user.id != ADMIN_TELEGRAM_ID:
+        await message.answer("У вас нет доступа к этой команде.")
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID задачи.\n"
+            "Пример: /complete 12"
+        )
+        return
+
+    try:
+        task_id = int(command.args.strip())
+    except ValueError:
+        await message.answer(
+            "ID задачи должен быть целым числом.\n"
+            "Пример: /complete 12"
+        )
+        return
+
+    if task_id <= 0:
+        await message.answer("ID задачи должен быть положительным числом.")
+        return
+
+    async with async_session_factory() as session:
+        try:
+            task = await complete_provisioning_task(
+                session,
+                task_id=task_id,
+                result_message=(
+                    "Выполнено администратором "
+                    f"Telegram ID {message.from_user.id}"
+                ),
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    await message.answer(
+        f"Задача #{task.id} отмечена выполненной."
+    )
 
 
 @dp.message()
