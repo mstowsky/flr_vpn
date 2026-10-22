@@ -1,10 +1,16 @@
 import logging
 from datetime import datetime
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from sqlalchemy import select
+
+from app.bot.keyboards.user import (
+    get_user_keyboard,
+    SUBSCRIPTION_BUTTON_TEXT,
+    TRIAL_BUTTON_TEXT,
+)
 
 from app.config import DISPLAY_TIMEZONE
 from app.database import async_session_factory
@@ -57,9 +63,13 @@ async def cmd_start(message: Message) -> None:
             "Твоя учётная запись найдена."
         )
 
-    await message.answer(text)
+    await message.answer(
+        text,
+        reply_markup=get_user_keyboard(),
+    )
 
 
+@router.message(F.text == TRIAL_BUTTON_TEXT)
 @router.message(Command("trial"))
 async def trial_command(message: Message) -> None:
     telegram_user = message.from_user
@@ -104,6 +114,7 @@ async def trial_command(message: Message) -> None:
     )
 
 
+@router.message(F.text == SUBSCRIPTION_BUTTON_TEXT)
 @router.message(Command("subscription"))
 async def subscription_command(message: Message) -> None:
     telegram_user = message.from_user

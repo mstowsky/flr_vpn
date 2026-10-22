@@ -2,10 +2,16 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiogram.types import ReplyKeyboardMarkup
+
 import pytest
 
 from app.bot.handlers import user as bot_main
-
+from app.bot.keyboards.user import (
+    get_user_keyboard,
+    SUBSCRIPTION_BUTTON_TEXT,
+    TRIAL_BUTTON_TEXT,
+)
 
 def make_message(telegram_id: int):
     """Создаёт имитацию сообщения от пользователя Telegram."""
@@ -136,3 +142,26 @@ async def test_subscription_command_without_telegram_user():
     message.answer.assert_awaited_once_with(
         "Не удалось определить пользователя Telegram."
     )
+
+
+def test_user_keyboard_contains_expected_buttons():
+    keyboard = get_user_keyboard()
+
+    assert isinstance(keyboard, ReplyKeyboardMarkup)
+
+    button_texts = [
+        button.text
+        for row in keyboard.keyboard
+        for button in row
+    ]
+
+    assert button_texts == [
+        TRIAL_BUTTON_TEXT,
+        SUBSCRIPTION_BUTTON_TEXT,
+    ]
+
+
+def test_user_keyboard_is_resizable():
+    keyboard = get_user_keyboard()
+
+    assert keyboard.resize_keyboard is True
