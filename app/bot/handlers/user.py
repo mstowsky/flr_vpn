@@ -152,8 +152,11 @@ async def subscription_command(message: Message) -> None:
             )
             return
 
+
+    plan_name = info["plan_name"]
     expires_at = info["expires_at"]
     remaining_days = info["remaining_days"]
+    provisioning_status = info["provisioning_status"]
 
     if not isinstance(expires_at, datetime):
         raise TypeError(
@@ -162,9 +165,19 @@ async def subscription_command(message: Message) -> None:
 
     local_expiry = expires_at.astimezone(DISPLAY_TIMEZONE)
 
+    if provisioning_status == "pending":
+        status_text = "ожидает настройки VPN-доступа"
+    elif provisioning_status == "completed":
+        status_text = "доступ настроен"
+    elif provisioning_status == "failed":
+        status_text = "требуется повторная настройка VPN-доступа"
+    else:
+        status_text = "статус выдачи доступа не подтверждён"
+
     await message.answer(
         "📋 Моя подписка\n\n"
-        "Статус: активна\n"
+        f"Название: {plan_name}\n"
+        f"Статус: {status_text}\n"
         f"Действует до: {local_expiry:%d.%m.%Y %H:%M}\n"
         f"Осталось дней: {remaining_days}"
     )

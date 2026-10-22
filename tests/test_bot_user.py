@@ -85,9 +85,10 @@ async def test_subscription_command_without_active_subscription():
     )
 
 
+
 @pytest.mark.asyncio
 async def test_subscription_command_shows_active_subscription():
-    """Для активной подписки показываются статус, дата окончания и остаток дней."""
+    """Для настроенного доступа показываются название, статус и срок подписки."""
     message = make_message(123456789)
     user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
     session_context, session = make_session_context(user=user)
@@ -97,8 +98,10 @@ async def test_subscription_command_shows_active_subscription():
     )
     subscription_info = {
         "status": "active",
+        "plan_name": "Пробный период",
         "expires_at": expires_at,
         "remaining_days": 10,
+        "provisioning_status": "completed",
     }
 
     with (
@@ -121,7 +124,8 @@ async def test_subscription_command_shows_active_subscription():
     local_expiry = expires_at.astimezone(bot_main.DISPLAY_TIMEZONE)
     expected_message = (
         "📋 Моя подписка\n\n"
-        "Статус: активна\n"
+        "Название: Пробный период\n"
+        "Статус: доступ настроен\n"
         f"Действует до: {local_expiry:%d.%m.%Y %H:%M}\n"
         "Осталось дней: 10"
     )
@@ -142,6 +146,53 @@ async def test_subscription_command_without_telegram_user():
     message.answer.assert_awaited_once_with(
         "Не удалось определить пользователя Telegram."
     )
+
+
+@pytest.mark.asyncio
+async def test_subscription_command_shows_pending_provisioning():
+    """Для ожидающей задачи бот сообщает, что VPN-доступ ещё настраивается."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+    session_context, session = make_session_context(user=user)
+
+    expires_at = datetime(
+        2026, 11, 1, 12, 0, tzinfo=timezone.utc
+    )
+    subscription_info = {
+        "status": "active",
+        "plan_name": "Пробный период",
+        "expires_at": expires_at,
+        "remaining_days": 10,
+        "provisioning_status": "pending",
+    }
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_user_subscription_info",
+            new_callable=AsyncMock,
+            return_value=subscription_info,
+        ) as get_subscription_info,
+    ):
+        await bot_main.subscription_command(message)
+
+    get_subscription_info.assert_awaited_once_with(session, user.id)
+
+    local_expiry = expires_at.astimezone(bot_main.DISPLAY_TIMEZONE)
+    expected_message = (
+        "📋 Моя подписка\n\n"
+        "Название: Пробный период\n"
+        "Статус: ожидает настройки VPN-доступа\n"
+        f"Действует до: {local_expiry:%d.%m.%Y %H:%M}\n"
+        "Осталось дней: 10"
+    )
+
+    message.answer.assert_awaited_once_with(expected_message)
 
 
 def test_user_keyboard_contains_expected_buttons():

@@ -4,8 +4,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.plan import Plan
-from app.models.user import User
+from app.models.provisioning_task import ProvisioningTask
 from app.models.subscription import Subscription
+from app.models.user import User
 
 TRIAL_PLAN_NAME = "Пробный период"
 TRIAL_DURATION_DAYS = 3
@@ -187,12 +188,11 @@ async def get_user_subscription_info(
     now: datetime | None = None,
 ) -> dict[str, str | datetime | int] | None:
     """
-    Возвращает информацию о действующей подписке пользователя.
+    Возвращает информацию о подписке и состоянии выдачи VPN-доступа.
 
     Оставшиеся дни округляются вверх.
     Если действующей подписки нет, возвращает None.
     """
-
     current_time = _as_utc(now or datetime.now(timezone.utc))
 
     subscription = await get_user_subscription(
@@ -205,18 +205,41 @@ async def get_user_subscription_info(
         return None
 
     expires_at = _as_utc(subscription.expires_at)
-    remaining_seconds = (expires_at - current_time).total_seconds()
+    remaining_seconds = (
+        expires_at - current_time
+    ).total_seconds()
 
-    # Даже если осталось меньше суток, показываем 1 день.
     remaining_days = max(
         1,
         int((remaining_seconds + 86_399) // 86_400),
     )
 
+    plan_result = await session.execute(
+        select(Plan).where(Plan.id == subscription.plan_id)
+    )
+    plan = plan_result.scalar_one_or_none()
+
+    task_result = await session.execute(
+        select(ProvisioningTask)
+        .where(
+            ProvisioningTask.subscription_id == subscription.id,
+            ProvisioningTask.task_type.in_(("create", "extend")),
+        )
+        .order_by(
+            ProvisioningTask.created_at.desc(),
+            ProvisioningTask.id.desc(),
+        )
+    )
+    task = task_result.scalars().first()
+
     return {
         "status": subscription.status,
+        "plan_name": plan.name if plan is not None else "Неизвестный тариф",
         "expires_at": expires_at,
         "remaining_days": remaining_days,
+        "provisioning_status": (
+            task.status if task is not None else "unknown"
+        ),
     }
 
 
