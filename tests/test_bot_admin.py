@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.bot import main as bot_main
+from app.bot.handlers import admin as bot_main
 
 
 def make_message(telegram_id: int):
