@@ -31,6 +31,7 @@ async def flush_database() -> None:
                 FROM sqlite_master
                 WHERE type = 'table'
                   AND name NOT LIKE 'sqlite_%'
+                  AND name != 'alembic_version'
                 """
             )
         )
