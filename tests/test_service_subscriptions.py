@@ -9,7 +9,7 @@ from app.models.provisioning_task import ProvisioningTask
 from app.models.subscription import Subscription
 from app.models.user import User
 from app.services.subscriptions import (
-    activate_trial_period,
+    activate_trial_plan,
     create_subscription,
     get_user_subscription,
     get_user_subscription_info,
@@ -519,10 +519,13 @@ async def test_activate_trial_period_creates_subscription_and_task(
     session,
     user,
 ):
-    """Пробный период создаёт подписку, тариф и задачу выдачи."""
+    """Пробный период создаёт подписку и задачу выдачи доступа."""
+
     now = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
 
-    subscription = await activate_trial_period(
+    await update_trial_plan(session)
+
+    subscription = await activate_trial_plan(
         session,
         user_id=user.id,
         now=now,
@@ -530,6 +533,7 @@ async def test_activate_trial_period_creates_subscription_and_task(
 
     await session.refresh(user)
 
+    assert subscription.id is not None
     assert subscription.user_id == user.id
     assert subscription.starts_at == as_utc_naive(now)
     assert subscription.expires_at == as_utc_naive(
@@ -548,6 +552,8 @@ async def test_activate_trial_period_creates_subscription_and_task(
     assert trial_plan.duration_days == 3
     assert trial_plan.max_devices == 1
     assert trial_plan.traffic_limit_gb == 5
+    assert trial_plan.is_active is True
+    assert trial_plan.is_trial is True
 
     task_result = await session.execute(
         select(ProvisioningTask).where(
@@ -568,10 +574,10 @@ async def test_activate_trial_period_cannot_be_used_twice(
     user,
 ):
     """Повторная активация пробного периода запрещена."""
-    await activate_trial_period(session, user_id=user.id)
+    await activate_trial_plan(session, user_id=user.id)
 
     with pytest.raises(ValueError, match="уже использован"):
-        await activate_trial_period(session, user_id=user.id)
+        await activate_trial_plan(session, user_id=user.id)
 
 
 @pytest.mark.asyncio
@@ -588,7 +594,7 @@ async def test_activate_trial_period_rejects_active_subscription(
     )
 
     with pytest.raises(ValueError, match="действующей подписке"):
-        await activate_trial_period(session, user_id=user.id)
+        await activate_trial_plan(session, user_id=user.id)
 
     await session.refresh(user)
     assert user.has_used_trial is False
@@ -598,7 +604,7 @@ async def test_activate_trial_period_rejects_active_subscription(
 async def test_activate_trial_period_rejects_missing_user(session):
     """Для несуществующего пользователя пробный период не создаётся."""
     with pytest.raises(ValueError, match="не найден"):
-        await activate_trial_period(session, user_id=999999)
+        await activate_trial_plan(session, user_id=999999)
 
 
 @pytest.mark.asyncio
@@ -628,8 +634,54 @@ async def test_update_trial_plan_updates_existing_plan(session):
 
 
 @pytest.mark.asyncio
-async def test_update_trial_plan_raises_if_plan_missing(session):
-    """Обновление отсутствующего тарифа вызывает ошибку."""
+async def test_update_trial_plan_creates_missing_plan(session):
+    """Если тариф отсутствует, он создаётся с нужными параметрами."""
 
-    with pytest.raises(ValueError, match="не найден"):
-        await update_trial_plan(session)
+    trial_plan = await update_trial_plan(session)
+
+    assert trial_plan.id is not None
+    assert trial_plan.name == "Пробный период"
+    assert trial_plan.price_rub == 0
+    assert trial_plan.duration_days == 3
+    assert trial_plan.max_devices == 1
+    assert trial_plan.traffic_limit_gb == 5
+    assert trial_plan.is_active is True
+    assert trial_plan.is_trial is True
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_rejects_missing_plan(
+    session,
+    user,
+):
+    """Активация без настроенного тарифа завершается понятной ошибкой."""
+
+    with pytest.raises(ValueError, match="не настроен"):
+        await activate_trial_plan(
+            session,
+            user_id=user.id,
+        )
+
+    await session.refresh(user)
+    assert user.has_used_trial is False
+
+
+@pytest.mark.asyncio
+async def test_activate_trial_period_rejects_inactive_plan(
+    session,
+    user,
+):
+    """Неактивный тариф нельзя использовать для пробного периода."""
+
+    trial_plan = await update_trial_plan(session)
+    trial_plan.is_active = False
+    await session.commit()
+
+    with pytest.raises(ValueError, match="неактивен"):
+        await activate_trial_plan(
+            session,
+            user_id=user.id,
+        )
+
+    await session.refresh(user)
+    assert user.has_used_trial is False

@@ -249,7 +249,7 @@ async def update_trial_plan(
     *,
     commit: bool = True,
 ) -> Plan:
-    """Обновляет параметры существующего тарифа пробного периода."""
+    """Создаёт или обновляет тариф пробного периода."""
 
     result = await session.execute(
         select(Plan).where(Plan.name == TRIAL_PLAN_NAME)
@@ -257,9 +257,8 @@ async def update_trial_plan(
     trial_plan = result.scalar_one_or_none()
 
     if trial_plan is None:
-        raise ValueError(
-            "Тариф пробного периода не найден."
-        )
+        trial_plan = Plan(name=TRIAL_PLAN_NAME)
+        session.add(trial_plan)
 
     trial_plan.price_rub = TRIAL_PRICE_RUB
     trial_plan.duration_days = TRIAL_DURATION_DAYS
@@ -277,13 +276,13 @@ async def update_trial_plan(
     return trial_plan
 
 
-async def activate_trial_period(
+async def activate_trial_plan(
     session: AsyncSession,
     *,
     user_id: int,
     now: datetime | None = None,
 ) -> Subscription:
-    """Активирует бесплатный пробный период и создаёт задачу выдачи VPN."""
+    """Активирует пробный период и создаёт задачу выдачи VPN."""
 
     from app.services.provisioning import create_provisioning_task
 
@@ -311,40 +310,21 @@ async def activate_trial_period(
             "Нельзя активировать пробный период при действующей подписке."
         )
 
-    try:
-        # Ищем тариф пробного периода или создаём его.
-        plan_result = await session.execute(
-            select(Plan).where(Plan.name == TRIAL_PLAN_NAME)
+    plan_result = await session.execute(
+        select(Plan).where(Plan.name == TRIAL_PLAN_NAME)
+    )
+    trial_plan = plan_result.scalar_one_or_none()
+
+    if trial_plan is None:
+        raise ValueError(
+            "Тариф пробного периода не настроен. "
+            "Сначала выполните update_trial_plan()."
         )
-        trial_plan = plan_result.scalar_one_or_none()
 
-        if trial_plan is None:
-            trial_plan = Plan(
-                name=TRIAL_PLAN_NAME,
-                price_rub=TRIAL_PRICE_RUB,
-                duration_days=TRIAL_DURATION_DAYS,
-                max_devices=TRIAL_MAX_DEVICES,
-                traffic_limit_gb=TRIAL_TRAFFIC_LIMIT_GB,
-                is_active=True,
-                is_trial=True,
-            )
-            session.add(trial_plan)
-            await session.flush()
-        else:
-            # Не используем тариф с тем же названием,
-            # если его параметры не соответствуют пробному периоду.
-            expected_settings = (
-                trial_plan.price_rub == TRIAL_PRICE_RUB
-                and trial_plan.duration_days == TRIAL_DURATION_DAYS
-                and trial_plan.max_devices == TRIAL_MAX_DEVICES
-                and trial_plan.traffic_limit_gb == TRIAL_TRAFFIC_LIMIT_GB
-            )
-            if not expected_settings or not trial_plan.is_active:
-                raise ValueError(
-                    "Тариф пробного периода имеет неверные параметры "
-                    "или неактивен."
-                )
+    if not trial_plan.is_active:
+        raise ValueError("Тариф пробного периода неактивен.")
 
+    try:
         subscription = await create_subscription(
             session,
             user_id=user_id,
@@ -353,7 +333,6 @@ async def activate_trial_period(
             commit=False,
         )
 
-        # Получаем ID подписки для задачи ручной выдачи доступа.
         await session.flush()
 
         await create_provisioning_task(
@@ -364,7 +343,6 @@ async def activate_trial_period(
             commit=False,
         )
 
-        # Флаг и подписка сохраняются в одной транзакции.
         user.has_used_trial = True
 
         await session.commit()

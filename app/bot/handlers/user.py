@@ -16,7 +16,7 @@ from app.config import DISPLAY_TIMEZONE
 from app.database import async_session_factory
 from app.models.user import User
 from app.services.subscriptions import (
-    activate_trial_period,
+    activate_trial_plan,
     get_user_subscription_info,
 )
 from app.services.users import get_or_create_user
@@ -89,7 +89,7 @@ async def trial_command(message: Message) -> None:
         )
 
         try:
-            subscription = await activate_trial_period(
+            subscription = await activate_trial_plan(
                 session,
                 user_id=user.id,
             )
