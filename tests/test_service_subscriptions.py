@@ -15,6 +15,7 @@ from app.services.subscriptions import (
     get_user_subscription_info,
     expire_subscriptions,
     extend_subscription,
+    update_trial_plan,
 )
 
 
@@ -598,3 +599,37 @@ async def test_activate_trial_period_rejects_missing_user(session):
     """Для несуществующего пользователя пробный период не создаётся."""
     with pytest.raises(ValueError, match="не найден"):
         await activate_trial_period(session, user_id=999999)
+
+
+@pytest.mark.asyncio
+async def test_update_trial_plan_updates_existing_plan(session):
+    """Параметры существующего тарифа приводятся к константам."""
+
+    trial_plan = Plan(
+        name="Пробный период",
+        price_rub=100,
+        duration_days=7,
+        max_devices=3,
+        traffic_limit_gb=20,
+        is_active=False,
+    )
+    session.add(trial_plan)
+    await session.commit()
+
+    updated_plan = await update_trial_plan(session)
+
+    assert updated_plan.id == trial_plan.id
+    assert updated_plan.name == "Пробный период"
+    assert updated_plan.price_rub == 0
+    assert updated_plan.duration_days == 3
+    assert updated_plan.max_devices == 1
+    assert updated_plan.traffic_limit_gb == 5
+    assert updated_plan.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_update_trial_plan_raises_if_plan_missing(session):
+    """Обновление отсутствующего тарифа вызывает ошибку."""
+
+    with pytest.raises(ValueError, match="не найден"):
+        await update_trial_plan(session)

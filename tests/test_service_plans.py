@@ -157,3 +157,32 @@ async def test_get_active_plans_returns_empty_list_when_no_active_plans(
     plans = await get_active_plans(session)
 
     assert plans == []
+
+
+@pytest.mark.asyncio
+async def test_get_active_plans_excludes_trial_plan(session):
+    """Пробный тариф не попадает в список активных тарифов."""
+
+    regular_plan = Plan(
+        name="Обычный тариф",
+        price_rub=199,
+        duration_days=30,
+        max_devices=2,
+        is_active=True,
+        is_trial=False,
+    )
+    trial_plan = Plan(
+        name="Пробный период",
+        price_rub=0,
+        duration_days=3,
+        max_devices=1,
+        traffic_limit_gb=5,
+        is_active=True,
+        is_trial=True,
+    )
+    session.add_all([regular_plan, trial_plan])
+    await session.commit()
+
+    plans = await get_active_plans(session)
+
+    assert [plan.name for plan in plans] == ["Обычный тариф"]

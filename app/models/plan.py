@@ -71,6 +71,12 @@ class Plan(Base):
         nullable=False,
     )
 
+    is_trial: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

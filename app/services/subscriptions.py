@@ -9,6 +9,7 @@ from app.models.subscription import Subscription
 from app.models.user import User
 
 TRIAL_PLAN_NAME = "Пробный период"
+TRIAL_IS_ACTIVE = True
 TRIAL_DURATION_DAYS = 3
 TRIAL_MAX_DEVICES = 1
 TRIAL_TRAFFIC_LIMIT_GB = 5
@@ -243,6 +244,39 @@ async def get_user_subscription_info(
     }
 
 
+async def update_trial_plan(
+    session: AsyncSession,
+    *,
+    commit: bool = True,
+) -> Plan:
+    """Обновляет параметры существующего тарифа пробного периода."""
+
+    result = await session.execute(
+        select(Plan).where(Plan.name == TRIAL_PLAN_NAME)
+    )
+    trial_plan = result.scalar_one_or_none()
+
+    if trial_plan is None:
+        raise ValueError(
+            "Тариф пробного периода не найден."
+        )
+
+    trial_plan.price_rub = TRIAL_PRICE_RUB
+    trial_plan.duration_days = TRIAL_DURATION_DAYS
+    trial_plan.max_devices = TRIAL_MAX_DEVICES
+    trial_plan.traffic_limit_gb = TRIAL_TRAFFIC_LIMIT_GB
+    trial_plan.is_active = TRIAL_IS_ACTIVE
+    trial_plan.is_trial = True
+
+    await session.flush()
+
+    if commit:
+        await session.commit()
+        await session.refresh(trial_plan)
+
+    return trial_plan
+
+
 async def activate_trial_period(
     session: AsyncSession,
     *,
@@ -292,6 +326,7 @@ async def activate_trial_period(
                 max_devices=TRIAL_MAX_DEVICES,
                 traffic_limit_gb=TRIAL_TRAFFIC_LIMIT_GB,
                 is_active=True,
+                is_trial=True,
             )
             session.add(trial_plan)
             await session.flush()

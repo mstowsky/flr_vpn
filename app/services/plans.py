@@ -8,7 +8,10 @@ async def get_active_plans(session: AsyncSession) -> list[Plan]:
     """Возвращает все активные тарифы."""
     result = await session.execute(
         select(Plan)
-        .where(Plan.is_active.is_(True))
+        .where(
+            Plan.is_active.is_(True),
+            Plan.is_trial.is_(False),
+        )
         .order_by(Plan.duration_days)
     )
     return list(result.scalars().all())
