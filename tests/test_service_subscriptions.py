@@ -574,6 +574,7 @@ async def test_activate_trial_period_cannot_be_used_twice(
     user,
 ):
     """Повторная активация пробного периода запрещена."""
+    await update_trial_plan(session)
     await activate_trial_plan(session, user_id=user.id)
 
     with pytest.raises(ValueError, match="уже использован"):
