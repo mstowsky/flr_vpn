@@ -91,6 +91,7 @@ async def complete_provisioning_task(
     commit: bool = True,
 ) -> ProvisioningTask:
     """Отмечает задачу выполненной."""
+
     task = await get_provisioning_task(session, task_id)
 
     if task is None:
@@ -99,10 +100,12 @@ async def complete_provisioning_task(
     if task.status == "completed":
         raise ValueError(f"Задача {task_id} уже выполнена")
 
+    current_time = _utc_now()
+
     task.status = "completed"
     task.result_message = result_message
-    task.completed_at = _utc_now()
-    task.updated_at = _utc_now()
+    task.completed_at = current_time
+    task.updated_at = current_time
 
     if task.task_type == "disable":
         if task.subscription_id is None:
