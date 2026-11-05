@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 from aiogram import F, Router
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
@@ -238,7 +239,7 @@ async def buy_command(
                 )
 
                 lines.append(
-                    f"**{plan.id}. {plan.name}**\n"
+                    f"*{plan.name} (ID={plan.id})*\n"
                     f"Цена: {plan.price_rub} ₽\n"
                     f"Срок: {plan.duration_days} дней\n"
                     f"Устройства: {plan.max_devices}\n"
@@ -254,6 +255,7 @@ async def buy_command(
             await message.answer(
                 "\n".join(lines),
                 reply_markup=get_buy_keyboard(plans),
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
 
