@@ -208,8 +208,8 @@ def test_user_keyboard_contains_expected_buttons():
     ]
 
     assert button_texts == [
-        TRIAL_BUTTON_TEXT,
         SUBSCRIPTION_BUTTON_TEXT,
+        TRIAL_BUTTON_TEXT,
         BUY_BUTTON_TEXT,
     ]
 

@@ -191,7 +191,7 @@ async def subscription_command(message: Message) -> None:
 @router.message(Command("buy"))
 async def buy_command(
     message: Message,
-    command: CommandObject,
+    command: CommandObject | None = None,
 ) -> None:
     telegram_user = message.from_user
 
