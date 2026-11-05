@@ -1,6 +1,9 @@
 from datetime import timezone
 
+import logging
+
 from aiogram import Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
@@ -19,6 +22,7 @@ from app.services.provisioning import (
 )
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def _is_admin(message: Message) -> bool:
@@ -131,6 +135,7 @@ async def tasks_command(message: Message) -> None:
         await message.answer(response[start:start + max_length])
 
 
+
 @router.message(Command("complete"))
 async def complete_command(
     message: Message,
@@ -165,6 +170,8 @@ async def complete_command(
         )
         return
 
+    notification_data = None
+
     async with async_session_factory() as session:
         try:
             task = await complete_provisioning_task(
@@ -179,9 +186,53 @@ async def complete_command(
             await message.answer(str(exc))
             return
 
+        # Уведомляем клиента только при создании
+        # или продлении VPN-доступа.
+        if (
+            task.task_type in {"create", "extend"}
+            and task.subscription_id is not None
+        ):
+            user = await session.get(User, task.user_id)
+            subscription = await session.get(
+                Subscription,
+                task.subscription_id,
+            )
+
+            if user is not None and subscription is not None:
+                plan = await session.get(
+                    Plan,
+                    subscription.plan_id,
+                )
+
+                if plan is not None:
+                    notification_data = {
+                        "telegram_id": user.telegram_id,
+                        "plan_name": plan.name,
+                    }
+
+    # Отправляем уведомление после успешного
+    # сохранения выполненной задачи.
+    if notification_data is not None:
+        try:
+            await message.bot.send_message(
+                chat_id=notification_data["telegram_id"],
+                text=(
+                    "✅ Ваша подписка "
+                    f"«{notification_data['plan_name']}» "
+                    "активирована."
+                ),
+            )
+        except TelegramAPIError:
+            logger.exception(
+                "Не удалось отправить уведомление "
+                "об активации подписки пользователю %s",
+                notification_data["telegram_id"],
+            )
+
     await message.answer(
         f"Задача #{task.id} отмечена выполненной."
     )
+
 
 
 @router.message(Command("fail"))

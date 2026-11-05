@@ -10,6 +10,9 @@ def make_message(telegram_id: int):
     return SimpleNamespace(
         from_user=SimpleNamespace(id=telegram_id),
         answer=AsyncMock(),
+        bot=SimpleNamespace(
+            send_message=AsyncMock(),
+        ),
     )
 
 
@@ -452,4 +455,91 @@ async def test_test_pay_command_success(monkeypatch):
         "Подписка активирована.\n"
         "Задача на подключение VPN создана.\n\n"
         "Проверь очередь командой /tasks."
+    )
+
+
+
+@pytest.mark.asyncio
+async def test_complete_command_sends_activation_notification_to_user(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    task = SimpleNamespace(
+        id=12,
+        task_type="create",
+        user_id=5,
+        subscription_id=7,
+    )
+
+    user = SimpleNamespace(telegram_id=123456789)
+    subscription = SimpleNamespace(plan_id=2)
+    plan = SimpleNamespace(name="1 месяц 2 устройства")
+
+    session, session_context = make_session_context()
+    session.get = AsyncMock(
+        side_effect=[user, subscription, plan]
+    )
+
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+    monkeypatch.setattr(
+        bot_main,
+        "complete_provisioning_task",
+        AsyncMock(return_value=task),
+    )
+
+    await bot_main.complete_command(message, command)
+
+    message.bot.send_message.assert_awaited_once_with(
+        chat_id=123456789,
+        text=(
+            "✅ Ваша подписка "
+            "«1 месяц 2 устройства» активирована."
+        ),
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Задача #12 отмечена выполненной."
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_command_does_not_notify_user_for_disable_task(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    task = SimpleNamespace(
+        id=12,
+        task_type="disable",
+        user_id=5,
+        subscription_id=7,
+    )
+
+    session, session_context = make_session_context()
+
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+    monkeypatch.setattr(
+        bot_main,
+        "complete_provisioning_task",
+        AsyncMock(return_value=task),
+    )
+
+    await bot_main.complete_command(message, command)
+
+    session.get.assert_not_awaited()
+    message.bot.send_message.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Задача #12 отмечена выполненной."
     )

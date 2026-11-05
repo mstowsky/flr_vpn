@@ -297,7 +297,7 @@ async def activate_trial_plan(
         raise ValueError(f"Пользователь с ID {user_id} не найден.")
 
     if user.has_used_trial:
-        raise ValueError("Пробный период уже использован.")
+        raise ValueError("Пробный период уже использован или была подключена подписка.")
 
     current_subscription = await get_user_subscription(
         session,
