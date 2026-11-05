@@ -11,6 +11,7 @@ from app.models.user import User
 from app.services.subscriptions import (
     activate_trial_plan,
     create_subscription,
+    subscription_deactivate,
     get_user_subscription,
     get_user_subscription_info,
     expire_subscriptions,
@@ -686,3 +687,147 @@ async def test_activate_trial_period_rejects_inactive_plan(
 
     await session.refresh(user)
     assert user.has_used_trial is False
+
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_cancels_subscription_and_creates_task(
+    session,
+    user,
+    plan,
+):
+    """Деактивация подписки создаёт задачу отключения VPN."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    subscription = await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now,
+    )
+
+    original_expiry = subscription.expires_at
+
+    deactivated = await subscription_deactivate(
+        session,
+        subscription_id=subscription.id,
+        now=now + timedelta(days=5),
+    )
+
+    await session.refresh(subscription)
+
+    assert deactivated.id == subscription.id
+    assert deactivated.user_id == user.id
+    assert deactivated.status == "cancelled"
+    assert subscription.status == "cancelled"
+
+    # Дата окончания подписки не изменяется.
+    assert subscription.expires_at == original_expiry
+
+    # Проверяем создание задачи отключения VPN.
+    result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.subscription_id == subscription.id
+        )
+    )
+    tasks = result.scalars().all()
+
+    assert len(tasks) == 1
+    assert tasks[0].user_id == user.id
+    assert tasks[0].subscription_id == subscription.id
+    assert tasks[0].task_type == "disable"
+    assert tasks[0].status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_rejects_missing_subscription(
+    session,
+):
+    """Деактивация несуществующей подписки вызывает ошибку."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="не найдена"):
+        await subscription_deactivate(
+            session,
+            subscription_id=999999,
+            now=now,
+        )
+
+    result = await session.execute(
+        select(ProvisioningTask)
+    )
+    assert result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_rejects_cancelled_subscription(
+    session,
+    user,
+    plan,
+):
+    """Повторная деактивация отменённой подписки запрещена."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    subscription = Subscription(
+        user_id=user.id,
+        plan_id=plan.id,
+        starts_at=as_utc_naive(now - timedelta(days=5)),
+        expires_at=as_utc_naive(now + timedelta(days=25)),
+        status="cancelled",
+    )
+    session.add(subscription)
+    await session.commit()
+
+    with pytest.raises(ValueError, match="не найдена"):
+        await subscription_deactivate(
+            session,
+            subscription_id=subscription.id,
+            now=now,
+        )
+
+    result = await session.execute(
+        select(ProvisioningTask)
+    )
+    assert result.scalars().all() == []
+
+    await session.refresh(subscription)
+    assert subscription.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_rejects_expired_subscription(
+    session,
+    user,
+    plan,
+):
+    """Деактивация истёкшей подписки запрещена."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    subscription = Subscription(
+        user_id=user.id,
+        plan_id=plan.id,
+        starts_at=as_utc_naive(now - timedelta(days=35)),
+        expires_at=as_utc_naive(now - timedelta(days=5)),
+        status="active",
+    )
+    session.add(subscription)
+    await session.commit()
+
+    with pytest.raises(ValueError, match="не найдена"):
+        await subscription_deactivate(
+            session,
+            subscription_id=subscription.id,
+            now=now,
+        )
+
+    result = await session.execute(
+        select(ProvisioningTask)
+    )
+    assert result.scalars().all() == []
+
+    await session.refresh(subscription)
+    assert subscription.status == "active"

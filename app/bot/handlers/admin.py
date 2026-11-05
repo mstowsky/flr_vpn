@@ -20,6 +20,7 @@ from app.services.provisioning import (
     get_pending_provisioning_tasks,
     retry_provisioning_task,
 )
+from app.services.subscriptions import subscription_deactivate
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -186,11 +187,10 @@ async def complete_command(
             await message.answer(str(exc))
             return
 
-        # Уведомляем клиента только при создании
-        # или продлении VPN-доступа.
+        # Уведомляем клиента при создании, продлении и деактивации подписки.
         if (
-            task.task_type in {"create", "extend"}
-            and task.subscription_id is not None
+                task.task_type in {"create", "extend", "disable"}
+                and task.subscription_id is not None
         ):
             user = await session.get(User, task.user_id)
             subscription = await session.get(
@@ -217,22 +217,29 @@ async def complete_command(
             await message.bot.send_message(
                 chat_id=notification_data["telegram_id"],
                 text=(
-                    "✅ Ваша подписка "
-                    f"«{notification_data['plan_name']}» "
-                    "активирована."
+                    (
+                        "❌ Ваша подписка "
+                        f"«{notification_data['plan_name']}» "
+                        "деактивирована."
+                    )
+                    if task.task_type == "disable"
+                    else (
+                        "✅ Ваша подписка "
+                        f"«{notification_data['plan_name']}» "
+                        "активирована."
+                    )
                 ),
             )
         except TelegramAPIError:
             logger.exception(
                 "Не удалось отправить уведомление "
-                "об активации подписки пользователю %s",
+                "пользователю %s после выполнения задачи",
                 notification_data["telegram_id"],
             )
 
     await message.answer(
         f"Задача #{task.id} отмечена выполненной."
     )
-
 
 
 @router.message(Command("fail"))
@@ -413,4 +420,115 @@ async def test_pay_command(
         "Подписка активирована.\n"
         "Задача на подключение VPN создана.\n\n"
         "Проверь очередь командой /tasks."
+    )
+
+
+@router.message(Command("test_subs_deactivate"))
+async def test_subs_deactivate_command(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    if not ENABLE_TEST_COMMANDS:
+        await message.answer(
+            "Тестовые команды отключены."
+        )
+        return
+
+    if message.from_user is None:
+        return
+
+    if not _is_admin(message):
+        await _deny_access(message)
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID подписки.\n"
+            "Пример: /test_subs_deactivate 12"
+        )
+        return
+
+    try:
+        subscription_id = int(command.args.strip())
+    except ValueError:
+        await message.answer(
+            "ID подписки должен быть целым числом.\n"
+            "Пример: /test_subs_deactivate 12"
+        )
+        return
+
+    if subscription_id <= 0:
+        await message.answer(
+            "ID подписки должен быть положительным числом."
+        )
+        return
+
+    async with async_session_factory() as session:
+        try:
+            subscription = await subscription_deactivate(
+                session,
+                subscription_id=subscription_id,
+                force=True,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    await message.answer(
+        f"✅ Подписка #{subscription.id} деактивирована.\n"
+        "Статус изменён на cancelled.\n"
+        "Задача на отключение VPN не создавалась."
+    )
+
+
+@router.message(Command("subscription_deactivate"))
+async def subscription_deactivate_command(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    if message.from_user is None:
+        return
+
+    if not _is_admin(message):
+        await _deny_access(message)
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID подписки.\n"
+            "Пример: /subscription_deactivate 12"
+        )
+        return
+
+    try:
+        subscription_id = int(command.args.strip())
+    except ValueError:
+        await message.answer(
+            "ID подписки должен быть целым числом.\n"
+            "Пример: /subscription_deactivate 12"
+        )
+        return
+
+    if subscription_id <= 0:
+        await message.answer(
+            "ID подписки должен быть положительным числом."
+        )
+        return
+
+    async with async_session_factory() as session:
+        try:
+            task = await subscription_deactivate(
+                session,
+                subscription_id=subscription_id,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    await message.answer(
+        f"✅ Создана задача #{task.id} "
+        f"на деактивацию подписки #{subscription_id}.\n\n"
+        "Подписка пока остаётся активной.\n"
+        "После отключения клиента в H UI "
+        f"выполни /complete {task.id}."
     )

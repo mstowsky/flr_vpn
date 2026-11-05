@@ -353,3 +353,87 @@ async def activate_trial_plan(
         raise
 
     return subscription
+
+
+async def subscription_deactivate(
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+    force: bool = False,
+    now: datetime | None = None,
+) -> Subscription | ProvisioningTask:
+    """
+    Деактивирует подписку.
+
+    По умолчанию создаёт задачу на отключение VPN.
+    При force=True немедленно меняет статус подписки
+    без создания задачи.
+    """
+
+    from app.services.provisioning import create_provisioning_task
+
+    current_time = _as_utc(
+        now or datetime.now(timezone.utc)
+    )
+
+    result = await session.execute(
+        select(Subscription).where(
+            Subscription.id == subscription_id,
+            Subscription.status == "active",
+            Subscription.expires_at > current_time,
+        )
+    )
+    subscription = result.scalar_one_or_none()
+
+    if subscription is None:
+        raise ValueError(
+            f"Действующая подписка с ID {subscription_id} не найдена."
+        )
+
+    # Принудительная деактивация без создания задачи.
+    if force:
+        subscription.status = "cancelled"
+        subscription.updated_at = current_time
+
+        try:
+            await session.commit()
+            await session.refresh(subscription)
+        except Exception:
+            await session.rollback()
+            raise
+
+        return subscription
+
+    # Проверяем, нет ли уже ожидающей задачи отключения.
+    task_result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.subscription_id == subscription.id,
+            ProvisioningTask.task_type == "disable",
+            ProvisioningTask.status == "pending",
+        )
+    )
+
+    if task_result.scalar_one_or_none() is not None:
+        raise ValueError(
+            f"Для подписки ID {subscription.id} "
+            "уже существует ожидающая задача на отключение."
+        )
+
+    # Создаём задачу, не меняя статус подписки.
+    try:
+        task = await create_provisioning_task(
+            session,
+            user_id=subscription.user_id,
+            task_type="disable",
+            subscription_id=subscription.id,
+            commit=False,
+        )
+
+        await session.commit()
+        await session.refresh(task)
+
+    except Exception:
+        await session.rollback()
+        raise
+
+    return task

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.provisioning_task import ProvisioningTask
-
+from app.models.subscription import Subscription
 
 VALID_TASK_TYPES = {"create", "extend", "disable"}
 VALID_TASK_STATUSES = {"pending", "completed", "failed"}
@@ -103,6 +103,26 @@ async def complete_provisioning_task(
     task.result_message = result_message
     task.completed_at = _utc_now()
     task.updated_at = _utc_now()
+
+    if task.task_type == "disable":
+        if task.subscription_id is None:
+            raise ValueError(
+                f"У задачи отключения ID {task_id} "
+                "не указана подписка."
+            )
+
+        subscription = await session.get(
+            Subscription,
+            task.subscription_id,
+        )
+
+        if subscription is None:
+            raise ValueError(
+                f"Подписка ID {task.subscription_id} не найдена."
+            )
+
+        subscription.status = "cancelled"
+        subscription.updated_at = current_time
 
     if commit:
         await session.commit()
