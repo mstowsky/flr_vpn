@@ -297,9 +297,21 @@ async def test_retry_command_success(monkeypatch):
 
 def make_session_context():
     session = MagicMock()
+
+    session.get = AsyncMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    session.flush = AsyncMock()
+
     session_context = MagicMock()
-    session_context.__aenter__ = AsyncMock(return_value=session)
-    session_context.__aexit__ = AsyncMock(return_value=False)
+    session_context.__aenter__ = AsyncMock(
+        return_value=session
+    )
+    session_context.__aexit__ = AsyncMock(
+        return_value=False
+    )
+
     return session, session_context
 
 
