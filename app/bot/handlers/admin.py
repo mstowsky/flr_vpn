@@ -5,11 +5,12 @@ from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
 from aiogram.types import Message
 
-from app.config import ADMIN_TELEGRAM_ID, DISPLAY_TIMEZONE
+from app.config import ADMIN_TELEGRAM_ID, DISPLAY_TIMEZONE, ENABLE_TEST_COMMANDS
 from app.database import async_session_factory
 from app.models.plan import Plan
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.services.payments import process_successful_payment
 from app.services.provisioning import (
     complete_provisioning_task,
     fail_provisioning_task,
@@ -296,5 +297,69 @@ async def retry_command(
 
     await message.answer(
         f"Задача #{task.id} возвращена в очередь.\n"
+        "Проверь очередь командой /tasks."
+    )
+
+
+@router.message(Command("test_pay"))
+async def test_pay_command(
+    message: Message,
+    command: CommandObject,
+) -> None:
+    if not ENABLE_TEST_COMMANDS:
+        await message.answer(
+            "Тестовые команды отключены."
+        )
+        return
+
+    if message.from_user is None:
+        return
+
+    if not _is_admin(message):
+        await _deny_access(message)
+        return
+
+    if not command.args:
+        await message.answer(
+            "Укажи ID заказа.\n"
+            "Пример: /test_pay 2"
+        )
+        return
+
+    try:
+        payment_id = int(command.args.strip())
+    except ValueError:
+        await message.answer(
+            "ID заказа должен быть целым числом.\n"
+            "Пример: /test_pay 2"
+        )
+        return
+
+    if payment_id <= 0:
+        await message.answer(
+            "ID заказа должен быть положительным числом."
+        )
+        return
+
+    async with async_session_factory() as session:
+        try:
+            payment = await process_successful_payment(
+                session,
+                payment_id=payment_id,
+            )
+        except ValueError as exc:
+            await message.answer(str(exc))
+            return
+
+    if payment is None:
+        await message.answer(
+            f"Заказ #{payment_id} не найден."
+        )
+        return
+
+    await message.answer(
+        f"✅ Тестовая оплата заказа #{payment.id} подтверждена.\n\n"
+        "Подписка активирована.\n"
+        "Задача на подключение VPN создана.\n\n"
         "Проверь очередь командой /tasks."
     )

@@ -46,3 +46,7 @@ if ADMIN_TELEGRAM_ID <= 0:
     raise RuntimeError(
         "ADMIN_TELEGRAM_ID должен быть положительным числом."
     )
+
+ENABLE_TEST_COMMANDS = (
+    os.getenv("ENABLE_TEST_COMMANDS", "false").lower() == "true"
+)
