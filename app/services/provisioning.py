@@ -98,7 +98,7 @@ async def complete_provisioning_task(
         raise ValueError(f"Задача с ID {task_id} не найдена")
 
     if task.status == "completed":
-        raise ValueError(f"Задача {task_id} уже выполнена")
+        raise ValueError(f"Задача с ID {task_id} уже выполнена")
 
     current_time = _utc_now()
 
