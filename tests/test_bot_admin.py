@@ -521,7 +521,7 @@ async def test_complete_command_sends_activation_notification_to_user(
 
 
 @pytest.mark.asyncio
-async def test_complete_command_does_not_notify_user_for_disable_task(
+async def test_complete_command_sends_deactivation_notification_to_user(
     monkeypatch,
 ):
     message = make_message(bot_main.ADMIN_TELEGRAM_ID)
@@ -534,7 +534,14 @@ async def test_complete_command_does_not_notify_user_for_disable_task(
         subscription_id=7,
     )
 
+    user = SimpleNamespace(telegram_id=123456789)
+    subscription = SimpleNamespace(plan_id=2)
+    plan = SimpleNamespace(name="1 месяц 2 устройства")
+
     session, session_context = make_session_context()
+    session.get = AsyncMock(
+        side_effect=[user, subscription, plan]
+    )
 
     monkeypatch.setattr(
         bot_main,
@@ -549,9 +556,323 @@ async def test_complete_command_does_not_notify_user_for_disable_task(
 
     await bot_main.complete_command(message, command)
 
-    session.get.assert_not_awaited()
-    message.bot.send_message.assert_not_awaited()
+    message.bot.send_message.assert_awaited_once_with(
+        chat_id=123456789,
+        text=(
+            "❌ Ваша подписка "
+            "«1 месяц 2 устройства» "
+            "деактивирована."
+        ),
+    )
 
     message.answer.assert_awaited_once_with(
         "Задача #12 отмечена выполненной."
+    )
+
+
+@pytest.mark.asyncio
+async def test_test_subs_deactivate_command_is_disabled(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    service = AsyncMock()
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", False)
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Тестовые команды отключены."
+    )
+    service.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_test_subs_deactivate_command_rejects_non_admin(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID + 1)
+    command = SimpleNamespace(args="12")
+
+    service = AsyncMock()
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", True)
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "У вас нет доступа к этой команде."
+    )
+    service.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_test_subs_deactivate_command_requires_subscription_id(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args=None)
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", True)
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    assert "Укажи ID подписки" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subscription_id", ["abc", "1.5", "0", "-1"])
+async def test_test_subs_deactivate_command_rejects_invalid_id(
+    monkeypatch,
+    subscription_id,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args=subscription_id)
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", True)
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    assert message.answer.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_test_subs_deactivate_command_reports_service_error(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    session, session_context = make_session_context()
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", True)
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+
+    service = AsyncMock(
+        side_effect=ValueError("Действующая подписка с ID 12 не найдена.")
+    )
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    service.assert_awaited_once_with(
+        session,
+        subscription_id=12,
+        force=True,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Действующая подписка с ID 12 не найдена."
+    )
+
+
+@pytest.mark.asyncio
+async def test_test_subs_deactivate_command_success(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    subscription = SimpleNamespace(id=12)
+    session, session_context = make_session_context()
+
+    monkeypatch.setattr(bot_main, "ENABLE_TEST_COMMANDS", True)
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+
+    service = AsyncMock(return_value=subscription)
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.test_subs_deactivate_command(
+        message,
+        command,
+    )
+
+    service.assert_awaited_once_with(
+        session,
+        subscription_id=12,
+        force=True,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "✅ Подписка #12 деактивирована.\n"
+        "Статус изменён на cancelled.\n"
+        "Задача на отключение VPN не создавалась."
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscription_deactivate_command_rejects_non_admin(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID + 1)
+    command = SimpleNamespace(args="12")
+
+    service = AsyncMock()
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.subscription_deactivate_command(
+        message,
+        command,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "У вас нет доступа к этой команде."
+    )
+    service.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subscription_deactivate_command_requires_subscription_id():
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args=None)
+
+    await bot_main.subscription_deactivate_command(
+        message,
+        command,
+    )
+
+    assert "Укажи ID подписки" in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subscription_id", ["abc", "1.5", "0", "-1"])
+async def test_subscription_deactivate_command_rejects_invalid_id(
+    subscription_id,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args=subscription_id)
+
+    await bot_main.subscription_deactivate_command(
+        message,
+        command,
+    )
+
+    assert message.answer.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_subscription_deactivate_command_reports_service_error(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    session, session_context = make_session_context()
+
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+
+    service = AsyncMock(
+        side_effect=ValueError("Действующая подписка с ID 12 не найдена.")
+    )
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.subscription_deactivate_command(
+        message,
+        command,
+    )
+
+    service.assert_awaited_once_with(
+        session,
+        subscription_id=12,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Действующая подписка с ID 12 не найдена."
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscription_deactivate_command_success(
+    monkeypatch,
+):
+    message = make_message(bot_main.ADMIN_TELEGRAM_ID)
+    command = SimpleNamespace(args="12")
+
+    task = SimpleNamespace(id=25)
+    session, session_context = make_session_context()
+
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+
+    service = AsyncMock(return_value=task)
+    monkeypatch.setattr(
+        bot_main,
+        "subscription_deactivate",
+        service,
+    )
+
+    await bot_main.subscription_deactivate_command(
+        message,
+        command,
+    )
+
+    service.assert_awaited_once_with(
+        session,
+        subscription_id=12,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "✅ Создана задача #25 "
+        "на деактивацию подписки #12.\n\n"
+        "Подписка пока остаётся активной.\n"
+        "После отключения клиента в H UI "
+        "выполни /complete 25."
     )

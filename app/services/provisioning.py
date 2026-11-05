@@ -3,8 +3,10 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.plan import Plan
 from app.models.provisioning_task import ProvisioningTask
 from app.models.subscription import Subscription
+from app.services.subscriptions import create_subscription
 
 VALID_TASK_TYPES = {"create", "extend", "disable"}
 VALID_TASK_STATUSES = {"pending", "completed", "failed"}
@@ -102,11 +104,6 @@ async def complete_provisioning_task(
 
     current_time = _utc_now()
 
-    task.status = "completed"
-    task.result_message = result_message
-    task.completed_at = current_time
-    task.updated_at = current_time
-
     if task.task_type == "disable":
         if task.subscription_id is None:
             raise ValueError(
@@ -126,6 +123,12 @@ async def complete_provisioning_task(
 
         subscription.status = "cancelled"
         subscription.updated_at = current_time
+
+    task.status = "completed"
+    task.result_message = result_message
+    task.completed_at = current_time
+    task.updated_at = current_time
+
 
     if commit:
         await session.commit()
@@ -198,3 +201,75 @@ async def retry_provisioning_task(
         await session.flush()
 
     return task
+
+
+@pytest.mark.asyncio
+async def test_complete_disable_task_cancels_subscription(
+    session,
+    user,
+):
+    """При выполнении задачи disable подписка получает статус cancelled."""
+
+    plan = Plan(
+        name="Тестовый тариф",
+        price_rub=199,
+        duration_days=30,
+        max_devices=3,
+        is_active=True,
+    )
+    session.add(plan)
+    await session.commit()
+    await session.refresh(plan)
+
+    subscription = await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    task = await create_provisioning_task(
+        session,
+        user_id=user.id,
+        task_type="disable",
+        subscription_id=subscription.id,
+    )
+
+    completed = await complete_provisioning_task(
+        session,
+        task_id=task.id,
+        result_message="Клиент отключён в H UI",
+    )
+
+    await session.refresh(subscription)
+
+    assert completed.status == "completed"
+    assert completed.result_message == "Клиент отключён в H UI"
+    assert completed.completed_at is not None
+
+    assert subscription.status == "cancelled"
+    assert subscription.updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_complete_disable_task_rejects_missing_subscription_id(
+    session,
+    user,
+):
+    """Задачу disable без ID подписки нельзя завершить."""
+
+    task = await create_provisioning_task(
+        session,
+        user_id=user.id,
+        task_type="disable",
+    )
+
+    with pytest.raises(ValueError, match="не указана подписка"):
+        await complete_provisioning_task(
+            session,
+            task_id=task.id,
+        )
+
+    await session.refresh(task)
+
+    assert task.status == "pending"
+    assert task.completed_at is None

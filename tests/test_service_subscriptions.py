@@ -689,14 +689,13 @@ async def test_activate_trial_period_rejects_inactive_plan(
     assert user.has_used_trial is False
 
 
-
 @pytest.mark.asyncio
-async def test_deactivate_subscription_cancels_subscription_and_creates_task(
+async def test_deactivate_subscription_creates_task_and_keeps_subscription_active(
     session,
     user,
     plan,
 ):
-    """Деактивация подписки создаёт задачу отключения VPN."""
+    """Обычная деактивация создаёт задачу, но не меняет статус подписки."""
 
     now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -709,7 +708,7 @@ async def test_deactivate_subscription_cancels_subscription_and_creates_task(
 
     original_expiry = subscription.expires_at
 
-    deactivated = await subscription_deactivate(
+    task = await subscription_deactivate(
         session,
         subscription_id=subscription.id,
         now=now + timedelta(days=5),
@@ -717,27 +716,14 @@ async def test_deactivate_subscription_cancels_subscription_and_creates_task(
 
     await session.refresh(subscription)
 
-    assert deactivated.id == subscription.id
-    assert deactivated.user_id == user.id
-    assert deactivated.status == "cancelled"
-    assert subscription.status == "cancelled"
+    assert task.id is not None
+    assert task.user_id == user.id
+    assert task.subscription_id == subscription.id
+    assert task.task_type == "disable"
+    assert task.status == "pending"
 
-    # Дата окончания подписки не изменяется.
+    assert subscription.status == "active"
     assert subscription.expires_at == original_expiry
-
-    # Проверяем создание задачи отключения VPN.
-    result = await session.execute(
-        select(ProvisioningTask).where(
-            ProvisioningTask.subscription_id == subscription.id
-        )
-    )
-    tasks = result.scalars().all()
-
-    assert len(tasks) == 1
-    assert tasks[0].user_id == user.id
-    assert tasks[0].subscription_id == subscription.id
-    assert tasks[0].task_type == "disable"
-    assert tasks[0].status == "pending"
 
 
 @pytest.mark.asyncio
@@ -831,3 +817,92 @@ async def test_deactivate_subscription_rejects_expired_subscription(
 
     await session.refresh(subscription)
     assert subscription.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_force_cancels_without_creating_task(
+    session,
+    user,
+    plan,
+):
+    """force=True сразу отменяет подписку без создания задачи."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    subscription = await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now,
+    )
+
+    original_expiry = subscription.expires_at
+
+    result = await subscription_deactivate(
+        session,
+        subscription_id=subscription.id,
+        force=True,
+        now=now + timedelta(days=5),
+    )
+
+    await session.refresh(subscription)
+
+    assert result.id == subscription.id
+    assert result.status == "cancelled"
+    assert subscription.status == "cancelled"
+    assert subscription.expires_at == original_expiry
+
+    tasks_result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.subscription_id == subscription.id
+        )
+    )
+
+    assert tasks_result.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_deactivate_subscription_rejects_duplicate_pending_task(
+    session,
+    user,
+    plan,
+):
+    """Нельзя создать две ожидающие задачи отключения одной подписки."""
+
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+
+    subscription = await create_subscription(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+        now=now,
+    )
+
+    await subscription_deactivate(
+        session,
+        subscription_id=subscription.id,
+        now=now,
+    )
+
+    with pytest.raises(ValueError, match="уже существует"):
+        await subscription_deactivate(
+            session,
+            subscription_id=subscription.id,
+            now=now,
+        )
+
+    await session.refresh(subscription)
+
+    assert subscription.status == "active"
+
+    tasks_result = await session.execute(
+        select(ProvisioningTask).where(
+            ProvisioningTask.subscription_id == subscription.id
+        )
+    )
+
+    tasks = tasks_result.scalars().all()
+
+    assert len(tasks) == 1
+    assert tasks[0].task_type == "disable"
+    assert tasks[0].status == "pending"
