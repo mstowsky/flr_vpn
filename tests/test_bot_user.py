@@ -216,3 +216,476 @@ def test_user_keyboard_is_resizable():
     keyboard = get_user_keyboard()
 
     assert keyboard.resize_keyboard is True
+
+
+def make_plan(
+    plan_id: int = 1,
+    name: str = "Стандарт",
+    price_rub: int = 300,
+    duration_days: int = 30,
+    max_devices: int = 2,
+    traffic_limit_gb: int | None = 100,
+):
+    """Создаёт имитацию тарифа."""
+    return SimpleNamespace(
+        id=plan_id,
+        name=name,
+        price_rub=price_rub,
+        duration_days=duration_days,
+        max_devices=max_devices,
+        traffic_limit_gb=traffic_limit_gb,
+    )
+
+
+def make_command(args: str | None = None):
+    """Создаёт имитацию аргументов Telegram-команды."""
+    return SimpleNamespace(args=args)
+
+
+@pytest.mark.asyncio
+async def test_buy_command_shows_active_plans():
+    """Команда /buy без аргументов показывает список доступных тарифов."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    plans = [
+        make_plan(
+            plan_id=1,
+            name="Базовый",
+            price_rub=200,
+            duration_days=30,
+            max_devices=1,
+            traffic_limit_gb=50,
+        ),
+        make_plan(
+            plan_id=2,
+            name="Премиум",
+            price_rub=500,
+            duration_days=90,
+            max_devices=3,
+            traffic_limit_gb=None,
+        ),
+    ]
+
+    session_context, session = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=plans,
+        ) as get_active_plans,
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command())
+
+    get_active_plans.assert_awaited_once_with(session)
+    create_payment.assert_not_awaited()
+
+    response = message.answer.await_args.args[0]
+
+    assert "Доступные тарифы" in response
+    assert "Базовый" in response
+    assert "200 ₽" in response
+    assert "30 дней" in response
+    assert "Устройства: 1" in response
+    assert "Трафик: 50 ГБ" in response
+
+    assert "Премиум" in response
+    assert "500 ₽" in response
+    assert "90 дней" in response
+    assert "Устройства: 3" in response
+    assert "Трафик: без ограничения" in response
+
+    assert "/buy 2" in response
+
+
+@pytest.mark.asyncio
+async def test_buy_command_without_active_plans():
+    """Если активных тарифов нет, бот сообщает об этом пользователю."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    session_context, session = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as get_active_plans,
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command())
+
+    get_active_plans.assert_awaited_once_with(session)
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Сейчас нет доступных тарифов. "
+        "Попробуй обратиться позже."
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_creates_payment():
+    """Команда /buy с ID тарифа создаёт заказ для выбранного тарифа."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=10, telegram_id=message.from_user.id)
+    plan = make_plan(plan_id=2)
+
+    payment = SimpleNamespace(
+        id=100,
+        amount_rub=300,
+    )
+
+    session_context, session = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[plan],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+            return_value=payment,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command("2"))
+
+    create_payment.assert_awaited_once_with(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_confirms_payment_creation():
+    """После создания заказа бот показывает его номер, тариф, срок и сумму."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=10, telegram_id=message.from_user.id)
+
+    plan = make_plan(
+        plan_id=2,
+        name="Премиум",
+        price_rub=500,
+        duration_days=90,
+    )
+
+    payment = SimpleNamespace(
+        id=100,
+        amount_rub=500,
+    )
+
+    session_context, _ = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[plan],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+            return_value=payment,
+        ),
+    ):
+        await bot_main.buy_command(message, make_command("2"))
+
+    message.answer.assert_awaited_once_with(
+        "✅ Заказ успешно создан!\n\n"
+        "Номер заказа: #100\n"
+        "Тариф: Премиум\n"
+        "Срок: 90 дней\n"
+        "Сумма: 500 ₽\n"
+        "Статус: ожидает оплаты.\n\n"
+        "Информация об оплате будет доступна после "
+        "подключения платёжного провайдера."
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_rejects_invalid_plan_id():
+    """Если ID тарифа не является числом, бот сообщает об ошибке."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    session_context, _ = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[make_plan()],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command("abc"))
+
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Укажи корректный ID тарифа.\n"
+        "Например: /buy 2"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan_id", ["0", "-1"])
+async def test_buy_command_rejects_non_positive_plan_id(plan_id):
+    """ID тарифа должен быть положительным числом."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    session_context, _ = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[make_plan()],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command(plan_id))
+
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "ID тарифа должен быть положительным числом."
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_rejects_missing_plan():
+    """Если тариф с указанным ID отсутствует, заказ не создаётся."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    session_context, _ = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[make_plan(plan_id=1)],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command("999"))
+
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Тариф не найден или больше недоступен.\n"
+        "Посмотреть доступные тарифы: /buy"
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_rejects_inactive_plan():
+    """Тариф, отсутствующий среди активных, нельзя выбрать для заказа."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    # В список активных тарифов тариф с ID 2 не попадает.
+    session_context, _ = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[make_plan(plan_id=1)],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command("2"))
+
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Тариф не найден или больше недоступен.\n"
+        "Посмотреть доступные тарифы: /buy"
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_requires_start():
+    """Незарегистрированному пользователю предлагают выполнить /start."""
+    message = make_message(123456789)
+    session_context, _ = make_session_context(user=None)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+        ) as get_active_plans,
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command())
+
+    get_active_plans.assert_not_awaited()
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Сначала зарегистрируйся командой /start."
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_without_telegram_user():
+    """Если отправитель не определён, команда корректно завершается."""
+    message = SimpleNamespace(
+        from_user=None,
+        answer=AsyncMock(),
+    )
+
+    with (
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+        ) as get_active_plans,
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command())
+
+    get_active_plans.assert_not_awaited()
+    create_payment.assert_not_awaited()
+
+    message.answer.assert_awaited_once_with(
+        "Не удалось определить пользователя Telegram."
+    )
+
+
+@pytest.mark.asyncio
+async def test_buy_command_handles_payment_creation_error():
+    """Если сервис не может создать заказ, бот показывает причину ошибки."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+    plan = make_plan(plan_id=2)
+
+    session_context, session = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=[plan],
+        ),
+        patch.object(
+            bot_main,
+            "create_payment",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Активный тариф с ID 2 не найден."),
+        ) as create_payment,
+    ):
+        await bot_main.buy_command(message, make_command("2"))
+
+    create_payment.assert_awaited_once_with(
+        session,
+        user_id=user.id,
+        plan_id=plan.id,
+    )
+
+    message.answer.assert_awaited_once_with(
+        "Активный тариф с ID 2 не найден."
+    )
