@@ -3,11 +3,12 @@ from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from app.bot.keyboards.user import (
     get_user_keyboard,
+    get_buy_keyboard,
     SUBSCRIPTION_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
 )
@@ -248,7 +249,10 @@ async def buy_command(
                 "Например: /buy 2"
             )
 
-            await message.answer("\n".join(lines))
+            await message.answer(
+                "\n".join(lines),
+                reply_markup=get_buy_keyboard(plans),
+            )
             return
 
         # Проверяем корректность ID.
@@ -308,6 +312,110 @@ async def buy_command(
         "Информация об оплате будет доступна после "
         "подключения платёжного провайдера."
     )
+
+
+@router.callback_query(F.data.startswith("buy:"))
+async def buy_plan_callback(callback: CallbackQuery) -> None:
+    """Создаёт заказ после выбора тарифа через inline-клавиатуру."""
+
+    telegram_user = callback.from_user
+
+    if telegram_user is None:
+        await callback.answer(
+            "Не удалось определить пользователя Telegram.",
+            show_alert=True,
+        )
+        return
+
+    # Получаем ID тарифа из callback_data.
+    try:
+        plan_id = int(callback.data.partition(":")[2])
+    except (ValueError, AttributeError):
+        await callback.answer(
+            "Некорректный выбор тарифа.",
+            show_alert=True,
+        )
+        return
+
+    if plan_id <= 0:
+        await callback.answer(
+            "Некорректный ID тарифа.",
+            show_alert=True,
+        )
+        return
+
+    async with async_session_factory() as session:
+        # Проверяем регистрацию пользователя.
+        result = await session.execute(
+            select(User).where(
+                User.telegram_id == telegram_user.id
+            )
+        )
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            await callback.answer(
+                "Сначала зарегистрируйся командой /start.",
+                show_alert=True,
+            )
+            return
+
+        # Проверяем, что тариф всё ещё активен.
+        plans = await get_active_plans(session)
+
+        plan = next(
+            (item for item in plans if item.id == plan_id),
+            None,
+        )
+
+        if plan is None:
+            await callback.answer(
+                "Тариф больше недоступен. "
+                "Обнови список командой /buy.",
+                show_alert=True,
+            )
+            return
+
+        # Создаём заказ.
+        try:
+            payment = await create_payment(
+                session,
+                user_id=user.id,
+                plan_id=plan.id,
+            )
+        except ValueError as exc:
+            await callback.answer(
+                str(exc),
+                show_alert=True,
+            )
+            return
+
+    logger.info(
+        "Создан заказ через клавиатуру: "
+        "payment_id=%s, user_id=%s, plan_id=%s",
+        payment.id,
+        user.id,
+        plan.id,
+    )
+
+    await callback.answer("Заказ успешно создан!")
+
+    # Убираем клавиатуру после выбора тарифа.
+    if isinstance(callback.message, Message):
+        await callback.message.edit_reply_markup(
+            reply_markup=None,
+        )
+
+        await callback.message.answer(
+            "✅ Заказ успешно создан!\n\n"
+            f"Номер заказа: #{payment.id}\n"
+            f"Тариф: {plan.name}\n"
+            f"Срок: {plan.duration_days} дней\n"
+            f"Сумма: {payment.amount_rub} ₽\n"
+            "Статус: ожидает оплаты.\n\n"
+            "Информация об оплате будет доступна после "
+            "подключения платёжного провайдера."
+        )
 
 
 @router.message()
