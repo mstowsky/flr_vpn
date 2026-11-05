@@ -9,6 +9,7 @@ import pytest
 from app.bot.handlers import user as bot_main
 from app.bot.keyboards.user import (
     get_user_keyboard,
+    BUY_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
 )
@@ -209,7 +210,41 @@ def test_user_keyboard_contains_expected_buttons():
     assert button_texts == [
         TRIAL_BUTTON_TEXT,
         SUBSCRIPTION_BUTTON_TEXT,
+        BUY_BUTTON_TEXT,
     ]
+
+
+@pytest.mark.asyncio
+async def test_buy_command_shows_active_plans_from_menu_button():
+    """Нажатие кнопки выбора тарифа показывает доступные тарифы."""
+    message = make_message(123456789)
+    user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
+
+    plans = [make_plan()]
+
+    session_context, session = make_session_context(user=user)
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_active_plans",
+            new_callable=AsyncMock,
+            return_value=plans,
+        ) as get_active_plans,
+    ):
+        await bot_main.buy_command(message)
+
+    get_active_plans.assert_awaited_once_with(session)
+
+    response = message.answer.await_args
+
+    assert "Доступные тарифы" in response.args[0]
+    assert response.kwargs["reply_markup"] is not None
 
 
 def test_user_keyboard_is_resizable():

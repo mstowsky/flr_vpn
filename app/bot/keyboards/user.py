@@ -7,8 +7,9 @@ from aiogram.types import (
 
 from app.models.plan import Plan
 
-TRIAL_BUTTON_TEXT = "🎁 Пробный период"
+BUY_BUTTON_TEXT = "🛒 Выбрать тариф"
 SUBSCRIPTION_BUTTON_TEXT = "📋 Моя подписка"
+TRIAL_BUTTON_TEXT = "🎁 Пробный период"
 
 
 def get_user_keyboard() -> ReplyKeyboardMarkup:
@@ -16,8 +17,11 @@ def get_user_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [
-                KeyboardButton(text=TRIAL_BUTTON_TEXT),
                 KeyboardButton(text=SUBSCRIPTION_BUTTON_TEXT),
+            ],
+            [
+                KeyboardButton(text=TRIAL_BUTTON_TEXT),
+                KeyboardButton(text=BUY_BUTTON_TEXT),
             ],
         ],
         resize_keyboard=True,

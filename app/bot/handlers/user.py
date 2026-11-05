@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.bot.keyboards.user import (
     get_user_keyboard,
     get_buy_keyboard,
+    BUY_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
 )
@@ -186,6 +187,7 @@ async def subscription_command(message: Message) -> None:
     )
 
 
+@router.message(F.text == BUY_BUTTON_TEXT)
 @router.message(Command("buy"))
 async def buy_command(
     message: Message,
@@ -225,7 +227,7 @@ async def buy_command(
             return
 
         # Если ID тарифа не указан — показываем список.
-        if not command.args:
+        if command is None or not command.args:
             lines = ["📋 Доступные тарифы:\n"]
 
             for plan in plans:
