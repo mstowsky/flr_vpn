@@ -2,9 +2,7 @@
 import asyncio
 import logging
 import shutil
-import threading
-
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from app.config import (
@@ -15,7 +13,6 @@ from app.config import (
     LOG_USER_ENABLED,
     LOG_USER_MAX_SIZE_MB,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 

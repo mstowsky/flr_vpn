@@ -14,7 +14,6 @@ from app.logging_config import (
     run_log_cleanup,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
