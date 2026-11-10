@@ -31,3 +31,4 @@ backups/
 
 # Logs
 *.log
+logs/
