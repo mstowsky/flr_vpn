@@ -3,10 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.plan import Plan
-from app.services.plans import (
-    create_plan,
-    get_active_plans,
-    get_plan_by_id)
+from app.services.plans import create_plan, get_active_plans, get_plan_by_id
 
 
 @pytest.mark.asyncio

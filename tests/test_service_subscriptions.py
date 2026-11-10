@@ -1,7 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from sqlalchemy import select
 
 from app.models.plan import Plan
@@ -11,18 +10,18 @@ from app.models.user import User
 from app.services.subscriptions import (
     activate_trial_plan,
     create_subscription,
-    subscription_deactivate,
-    get_user_subscription,
-    get_user_subscription_info,
     expire_subscriptions,
     extend_subscription,
+    get_user_subscription,
+    get_user_subscription_info,
+    subscription_deactivate,
     update_trial_plan,
 )
 
 
 def as_utc_naive(value: datetime) -> datetime:
     """Представляет UTC-дату в формате, возвращаемом SQLite."""
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 @pytest.fixture
@@ -79,7 +78,7 @@ async def test_create_subscription_for_active_plan(
     plan,
 ):
     """Создание подписки на активный тариф."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = await create_subscription(
         session,
@@ -105,7 +104,7 @@ async def test_create_subscription_for_inactive_plan(
     inactive_plan,
 ):
     """Создание подписки на неактивный тариф вызывает ошибку."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     with pytest.raises(ValueError, match="не найден"):
         await create_subscription(
@@ -122,7 +121,7 @@ async def test_create_subscription_for_missing_plan(
     user,
 ):
     """Создание подписки на несуществующий тариф вызывает ошибку."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     with pytest.raises(ValueError, match="не найден"):
         await create_subscription(
@@ -140,7 +139,7 @@ async def test_get_user_subscription_returns_active_subscription(
     plan,
 ):
     """Возвращается действующая подписка пользователя."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     subscription = await create_subscription(
         session,
@@ -173,7 +172,7 @@ async def test_get_user_subscription_ignores_expired_subscription(
     plan,
 ):
     """Истёкшая по дате подписка не считается действующей."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expired_at = now - timedelta(days=1)
 
     subscription = Subscription(
@@ -198,7 +197,7 @@ async def test_get_user_subscription_ignores_cancelled_subscription(
     plan,
 ):
     """Отменённая подписка не считается действующей."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -222,7 +221,7 @@ async def test_extend_subscription_from_current_expiry(
     plan,
 ):
     """Действующая подписка продлевается от текущей даты окончания."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     original = await create_subscription(
         session,
@@ -230,7 +229,7 @@ async def test_extend_subscription_from_current_expiry(
         plan_id=plan.id,
         now=now,
     )
-    original_expiry = original.expires_at.replace(tzinfo=timezone.utc)
+    original_expiry = original.expires_at.replace(tzinfo=UTC)
 
     extended = await extend_subscription(
         session,
@@ -253,7 +252,7 @@ async def test_extend_expired_subscription_starts_new_period(
     plan,
 ):
     """Для истёкшей подписки создаётся новый период, старый сохраняется."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     original = Subscription(
         user_id=user.id,
@@ -295,7 +294,7 @@ async def test_extend_subscription_creates_subscription_if_missing(
     plan,
 ):
     """Продление без существующей подписки создаёт новую."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = await extend_subscription(
         session,
@@ -321,7 +320,7 @@ async def test_extend_subscription_for_inactive_plan(
     inactive_plan,
 ):
     """Продление на неактивный тариф вызывает ошибку."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     with pytest.raises(ValueError, match="не найден"):
         await extend_subscription(
@@ -339,7 +338,7 @@ async def test_expire_subscriptions_updates_expired_records(
     plan,
 ):
     """Истёкшая подписка переводится в статус expired."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -368,7 +367,7 @@ async def test_expire_subscriptions_keeps_active_records(
     plan,
 ):
     """Подписка с будущим сроком действия остаётся активной."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -395,7 +394,7 @@ async def test_expire_subscriptions_ignores_non_active_records(
     plan,
 ):
     """Отменённые подписки не изменяются."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -422,7 +421,7 @@ async def test_get_user_subscription_info_returns_details(
     plan,
 ):
     """Информация о действующей подписке содержит нужные поля."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     subscription = await create_subscription(
         session,
@@ -440,7 +439,7 @@ async def test_get_user_subscription_info_returns_details(
     assert info is not None
     assert info["status"] == "active"
     assert info["expires_at"] == datetime(
-        2026, 11, 20, 12, 0, tzinfo=timezone.utc
+        2026, 11, 20, 12, 0, tzinfo=UTC
     )
     assert info["remaining_days"] == 30
 
@@ -452,7 +451,7 @@ async def test_get_user_subscription_info_rounds_up_remaining_days(
     plan,
 ):
     """Неполные сутки округляются вверх до одного дня."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     await create_subscription(
         session,
@@ -479,7 +478,7 @@ async def test_get_user_subscription_info_returns_none_if_missing(
     user,
 ):
     """Без действующей подписки возвращается None."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     info = await get_user_subscription_info(
         session,
@@ -497,7 +496,7 @@ async def test_get_user_subscription_info_returns_none_if_expired(
     plan,
 ):
     """Подписка с истёкшим сроком не возвращается."""
-    now = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
     await create_subscription(
         session,
@@ -522,7 +521,7 @@ async def test_activate_trial_period_creates_subscription_and_task(
 ):
     """Пробный период создаёт подписку и задачу выдачи доступа."""
 
-    now = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
 
     await update_trial_plan(session)
 
@@ -697,7 +696,7 @@ async def test_deactivate_subscription_creates_task_and_keeps_subscription_activ
 ):
     """Обычная деактивация создаёт задачу, но не меняет статус подписки."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     subscription = await create_subscription(
         session,
@@ -732,7 +731,7 @@ async def test_deactivate_subscription_rejects_missing_subscription(
 ):
     """Деактивация несуществующей подписки вызывает ошибку."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     with pytest.raises(ValueError, match="не найдена"):
         await subscription_deactivate(
@@ -755,7 +754,7 @@ async def test_deactivate_subscription_rejects_cancelled_subscription(
 ):
     """Повторная деактивация отменённой подписки запрещена."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -791,7 +790,7 @@ async def test_deactivate_subscription_rejects_expired_subscription(
 ):
     """Деактивация истёкшей подписки запрещена."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     subscription = Subscription(
         user_id=user.id,
@@ -827,7 +826,7 @@ async def test_deactivate_subscription_force_cancels_without_creating_task(
 ):
     """force=True сразу отменяет подписку без создания задачи."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     subscription = await create_subscription(
         session,
@@ -869,7 +868,7 @@ async def test_deactivate_subscription_rejects_duplicate_pending_task(
 ):
     """Нельзя создать две ожидающие задачи отключения одной подписки."""
 
-    now = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
     subscription = await create_subscription(
         session,

@@ -1,17 +1,15 @@
-from datetime import timezone
-
 import logging
+from datetime import UTC
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
-from aiogram import F
 from aiogram.types import (
-    Message,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Message,
 )
 
 from app.config import ADMIN_TELEGRAM_ID, DISPLAY_TIMEZONE, ENABLE_TEST_COMMANDS
@@ -96,8 +94,6 @@ async def tasks_command(message: Message) -> None:
             )
             return
 
-        lines = ["📋 Ожидающие задачи VPN-доступа:\n"]
-
         for task in tasks:
             user = await session.get(User, task.user_id)
 
@@ -139,7 +135,7 @@ async def tasks_command(message: Message) -> None:
             }
 
             created_at = task.created_at.replace(
-                tzinfo=timezone.utc
+                tzinfo=UTC
             ).astimezone(DISPLAY_TIMEZONE)
 
             task_text = (
@@ -449,14 +445,11 @@ async def fail_command(
         )
         return
 
-    if len(parts) < 2 or not parts[1].strip():
-        await message.answer(
-            "Укажи причину ошибки.\n"
-            "Пример: /fail 12 Не удалось найти клиента в H UI"
-        )
-        return
-
-    reason = parts[1].strip()
+    reason = (
+        parts[1].strip()
+        if len(parts) >= 2 and parts[1].strip()
+        else "Причина не указана"
+    )
 
     async with async_session_factory() as session:
         try:

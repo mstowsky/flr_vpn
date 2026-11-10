@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +18,8 @@ TRIAL_PRICE_RUB = 0
 def _as_utc(value: datetime) -> datetime:
     """Приводит дату к UTC, учитывая SQLite без timezone."""
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 async def get_user_subscription(
@@ -30,7 +30,7 @@ async def get_user_subscription(
 ) -> Subscription | None:
     """Возвращает последнюю действующую подписку пользователя."""
 
-    current_time = _as_utc(now or datetime.now(timezone.utc))
+    current_time = _as_utc(now or datetime.now(UTC))
 
     result = await session.execute(
         select(Subscription)
@@ -59,7 +59,7 @@ async def create_subscription(
     """Создаёт подписку на активный тариф."""
 
     current_time = _as_utc(
-        now or datetime.now(timezone.utc)
+        now or datetime.now(UTC)
     )
 
     result = await session.execute(
@@ -104,7 +104,7 @@ async def extend_subscription(
     """Продлевает действующую подписку или создаёт новый период."""
 
     current_time = _as_utc(
-        now or datetime.now(timezone.utc)
+        now or datetime.now(UTC)
     )
 
     result = await session.execute(
@@ -160,7 +160,7 @@ async def expire_subscriptions(
     """Переводит истёкшие активные подписки в статус expired."""
 
     current_time = _as_utc(
-        now or datetime.now(timezone.utc)
+        now or datetime.now(UTC)
     )
 
     result = await session.execute(
@@ -194,7 +194,7 @@ async def get_user_subscription_info(
     Оставшиеся дни округляются вверх.
     Если действующей подписки нет, возвращает None.
     """
-    current_time = _as_utc(now or datetime.now(timezone.utc))
+    current_time = _as_utc(now or datetime.now(UTC))
 
     subscription = await get_user_subscription(
         session,
@@ -286,7 +286,7 @@ async def activate_trial_plan(
 
     from app.services.provisioning import create_provisioning_task
 
-    current_time = _as_utc(now or datetime.now(timezone.utc))
+    current_time = _as_utc(now or datetime.now(UTC))
 
     user_result = await session.execute(
         select(User).where(User.id == user_id)
@@ -373,7 +373,7 @@ async def subscription_deactivate(
     from app.services.provisioning import create_provisioning_task
 
     current_time = _as_utc(
-        now or datetime.now(timezone.utc)
+        now or datetime.now(UTC)
     )
 
     result = await session.execute(

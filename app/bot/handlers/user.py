@@ -8,13 +8,12 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from app.bot.keyboards.user import (
-    get_user_keyboard,
-    get_buy_keyboard,
     BUY_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
+    get_buy_keyboard,
+    get_user_keyboard,
 )
-
 from app.config import DISPLAY_TIMEZONE
 from app.database import async_session_factory
 from app.models.payment import Payment

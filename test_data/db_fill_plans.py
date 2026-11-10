@@ -13,7 +13,6 @@ from app.services.subscriptions import (
     TRIAL_TRAFFIC_LIMIT_GB,
 )
 
-
 logger = logging.getLogger(__name__)
 
 SEED_PLANS = [

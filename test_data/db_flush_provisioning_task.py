@@ -6,7 +6,6 @@ from sqlalchemy import delete
 from app.database import async_session_factory, close_db
 from app.models.provisioning_task import ProvisioningTask
 
-
 logger = logging.getLogger(__name__)
 
 

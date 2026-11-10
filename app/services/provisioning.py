@@ -1,19 +1,17 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.plan import Plan
 from app.models.provisioning_task import ProvisioningTask
 from app.models.subscription import Subscription
-from app.services.subscriptions import create_subscription
 
 VALID_TASK_TYPES = {"create", "extend", "disable"}
 VALID_TASK_STATUSES = {"pending", "completed", "failed"}
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def create_provisioning_task(

@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiogram.types import InlineKeyboardMarkup
 
 from app.bot.handlers import admin as bot_main
 
@@ -154,14 +155,50 @@ async def test_fail_command_rejects_non_admin(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fail_command_requires_reason():
+async def test_fail_command_without_reason(monkeypatch):
+    """Команда /fail работает без указания причины."""
+
     message = make_message(bot_main.ADMIN_TELEGRAM_ID)
     command = SimpleNamespace(args="12")
 
+    task = SimpleNamespace(id=12)
+
+    session = MagicMock()
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    session_context.__aexit__ = AsyncMock(return_value=False)
+
+    fail_service = AsyncMock(return_value=task)
+
+    monkeypatch.setattr(
+        bot_main,
+        "async_session_factory",
+        MagicMock(return_value=session_context),
+    )
+
+    monkeypatch.setattr(
+        bot_main,
+        "fail_provisioning_task",
+        fail_service,
+    )
+
     await bot_main.fail_command(message, command)
 
-    message.answer.assert_awaited_once()
-    assert "причину ошибки" in message.answer.await_args.args[0]
+    fail_service.assert_awaited_once_with(
+        session,
+        task_id=12,
+        result_message=(
+            "Ошибка: Причина не указана. "
+            "Администратор Telegram ID "
+            f"{bot_main.ADMIN_TELEGRAM_ID}"
+        ),
+    )
+
+    response = message.answer.await_args.args[0]
+
+    assert "Задача #12 отмечена как неудачная" in response
+    assert "Причина: Причина не указана" in response
+    assert "/retry 12" in response
 
 
 @pytest.mark.asyncio
@@ -876,3 +913,19 @@ async def test_subscription_deactivate_command_success(
         "После отключения клиента в H UI "
         "выполни /complete 25."
     )
+
+
+def test_get_task_keyboard():
+    keyboard = bot_main.get_task_keyboard(12)
+
+    assert isinstance(keyboard, InlineKeyboardMarkup)
+
+    buttons = keyboard.inline_keyboard[0]
+
+    assert len(buttons) == 2
+
+    assert buttons[0].text == "✅ Подтвердить"
+    assert buttons[0].callback_data == "task:complete:12"
+
+    assert buttons[1].text == "❌ Отменить"
+    assert buttons[1].callback_data == "task:fail:12"

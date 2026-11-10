@@ -1,7 +1,7 @@
 import os
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from zoneinfo import ZoneInfo
 
 load_dotenv()
 

@@ -7,7 +7,6 @@ from sqlalchemy.exc import IntegrityError
 from app.database import async_session_factory, close_db
 from app.models.user import User
 
-
 logger = logging.getLogger(__name__)
 
 

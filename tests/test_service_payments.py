@@ -1,17 +1,20 @@
+from datetime import UTC
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.payment import Payment
 from app.models.plan import Plan
-from app.models.user import User
 from app.models.provisioning_task import ProvisioningTask
+from app.models.user import User
 from app.services.payments import (
     create_payment,
     get_payment_by_id,
     get_user_payments,
+    process_successful_payment,
     update_payment_status,
-    process_successful_payment)
+)
 
 
 async def create_test_user(
@@ -335,7 +338,7 @@ async def test_process_successful_payment_creates_subscription(
     session: AsyncSession,
 ) -> None:
     """Успешная оплата создаёт подписку и меняет статус платежа."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
     from app.models.subscription import Subscription
 
@@ -363,8 +366,8 @@ async def test_process_successful_payment_creates_subscription(
     assert subscription.status == "active"
     assert subscription.plan_id == plan.id
     assert subscription.expires_at > subscription.starts_at
-    assert subscription.expires_at.replace(tzinfo=timezone.utc) == (
-        subscription.starts_at.replace(tzinfo=timezone.utc)
+    assert subscription.expires_at.replace(tzinfo=UTC) == (
+        subscription.starts_at.replace(tzinfo=UTC)
         + timedelta(days=plan.duration_days)
     )
 
@@ -493,7 +496,7 @@ async def test_successful_payment_extends_existing_subscription(
     session: AsyncSession,
 ) -> None:
     """Повторная покупка продлевает существующую подписку."""
-    from datetime import timedelta, timezone
+    from datetime import timedelta
 
     from app.models.subscription import Subscription
 
@@ -515,7 +518,7 @@ async def test_successful_payment_extends_existing_subscription(
     )
     subscription = result.scalar_one()
     original_expiry = subscription.expires_at.replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
     )
     original_id = subscription.id
 
@@ -531,7 +534,7 @@ async def test_successful_payment_extends_existing_subscription(
 
     assert subscription.id == original_id
     assert subscription.expires_at.replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
     ) == original_expiry + timedelta(days=30)
 
     count_result = await session.execute(
@@ -547,7 +550,7 @@ async def test_successful_payment_switches_subscription_plan(
     session: AsyncSession,
 ) -> None:
     """При оплате другого тарифа обновляется план и срок подписки."""
-    from datetime import timedelta, timezone
+    from datetime import timedelta
 
     from app.models.subscription import Subscription
 
@@ -580,7 +583,7 @@ async def test_successful_payment_switches_subscription_plan(
     )
     subscription = result.scalar_one()
     original_expiry = subscription.expires_at.replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
     )
     original_id = subscription.id
 
@@ -596,7 +599,7 @@ async def test_successful_payment_switches_subscription_plan(
     assert subscription.id == original_id
     assert subscription.plan_id == second_plan.id
     assert subscription.expires_at.replace(
-        tzinfo=timezone.utc
+        tzinfo=UTC
     ) == original_expiry + timedelta(days=90)
 
     count_result = await session.execute(
@@ -656,7 +659,7 @@ async def test_successful_payment_rolls_back_when_subscription_extension_fails(
             session: AsyncSession,
     ) -> None:
         """После истечения подписки оплата создаёт новый период."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.models.subscription import Subscription
         from app.services.payments import process_successful_payment
@@ -665,7 +668,7 @@ async def test_successful_payment_rolls_back_when_subscription_extension_fails(
         user_id = user.id
         plan = await create_test_plan(session)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_expiry = now - timedelta(days=10)
 
         old_subscription = Subscription(

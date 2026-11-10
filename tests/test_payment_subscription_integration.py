@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -18,8 +18,8 @@ from app.services.subscriptions import get_user_subscription
 def as_utc(value: datetime) -> datetime:
     """Приводит дату к UTC, учитывая формат SQLite."""
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 @pytest.fixture

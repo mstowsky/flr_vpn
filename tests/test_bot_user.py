@@ -1,18 +1,18 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import ReplyKeyboardMarkup
-
 import pytest
+from aiogram.types import ReplyKeyboardMarkup
 
 from app.bot.handlers import user as bot_main
 from app.bot.keyboards.user import (
-    get_user_keyboard,
     BUY_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
+    get_user_keyboard,
 )
+
 
 def make_message(telegram_id: int):
     """Создаёт имитацию сообщения от пользователя Telegram."""
@@ -62,6 +62,16 @@ async def test_subscription_command_without_active_subscription():
     user = SimpleNamespace(id=1, telegram_id=message.from_user.id)
     session_context, session = make_session_context(user=user)
 
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+
+    pending_result = MagicMock()
+    pending_result.scalar_one_or_none.return_value = None
+
+    session.execute = AsyncMock(
+        side_effect=[user_result, pending_result]
+    )
+
     with (
         patch.object(
             bot_main,
@@ -95,7 +105,7 @@ async def test_subscription_command_shows_active_subscription():
     session_context, session = make_session_context(user=user)
 
     expires_at = datetime(
-        2026, 11, 1, 12, 0, tzinfo=timezone.utc
+        2026, 11, 1, 12, 0, tzinfo=UTC
     )
     subscription_info = {
         "status": "active",
@@ -157,7 +167,7 @@ async def test_subscription_command_shows_pending_provisioning():
     session_context, session = make_session_context(user=user)
 
     expires_at = datetime(
-        2026, 11, 1, 12, 0, tzinfo=timezone.utc
+        2026, 11, 1, 12, 0, tzinfo=UTC
     )
     subscription_info = {
         "status": "active",
@@ -723,4 +733,52 @@ async def test_buy_command_handles_payment_creation_error():
 
     message.answer.assert_awaited_once_with(
         "Активный тариф с ID 2 не найден."
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscription_command_shows_pending_payment():
+    """Если подписки нет, но есть неоплаченная заявка,
+    показывается название выбранного тарифа.
+    """
+    message = make_message(123456789)
+    user = SimpleNamespace(
+        id=1,
+        telegram_id=message.from_user.id,
+    )
+
+    session_context, session = make_session_context(user=user)
+
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = user
+
+    pending_result = MagicMock()
+    pending_result.scalar_one_or_none.return_value = "1 год"
+
+    session.execute = AsyncMock(
+        side_effect=[user_result, pending_result]
+    )
+
+    with (
+        patch.object(
+            bot_main,
+            "async_session_factory",
+            return_value=session_context,
+        ),
+        patch.object(
+            bot_main,
+            "get_user_subscription_info",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        await bot_main.subscription_command(message)
+
+    message.answer.assert_awaited_once_with(
+        "У тебя пока нет действующей подписки.\n\n"
+        "📋 В системе имеется заявка на подключение "
+        "подписки «1 год».\n\n"
+        "После подтверждения оплаты подписка будет "
+        "активирована, а задача на настройку VPN-доступа "
+        "появится в очереди."
     )

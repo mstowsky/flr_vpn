@@ -6,7 +6,6 @@ from sqlalchemy import delete
 from app.database import async_session_factory, close_db
 from app.models.payment import Payment
 
-
 logger = logging.getLogger(__name__)
 
 

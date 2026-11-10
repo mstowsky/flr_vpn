@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -37,7 +37,7 @@ async def create_subscription(
     plan: Plan,
     **kwargs,
 ) -> Subscription:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     subscription_data = {
         "user_id": user.id,
@@ -142,7 +142,7 @@ async def test_subscription_requires_mandatory_fields(
 ) -> None:
     user, plan = await create_user_and_plan(session)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     subscription_data = {
         "user_id": user.id,
         "plan_id": plan.id,
@@ -169,7 +169,7 @@ async def test_subscription_rejects_nonexistent_foreign_key(
 ) -> None:
     user, plan = await create_user_and_plan(session)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     subscription_data = {
         "user_id": user.id,
         "plan_id": plan.id,
@@ -196,7 +196,7 @@ async def test_subscription_rejects_invalid_status(
 ) -> None:
     user, plan = await create_user_and_plan(session)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     session.add(
         Subscription(
@@ -249,7 +249,7 @@ async def test_subscription_rejects_invalid_date_range(
 ) -> None:
     user, plan = await create_user_and_plan(session)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     session.add(
         Subscription(
@@ -272,7 +272,7 @@ async def test_subscription_updates_updated_at(
     user, plan = await create_user_and_plan(session)
 
     old_timestamp = datetime(
-        2020, 1, 1, tzinfo=timezone.utc
+        2020, 1, 1, tzinfo=UTC
     )
     subscription = await create_subscription(
         session,
