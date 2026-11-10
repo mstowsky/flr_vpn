@@ -20,3 +20,7 @@ check-fix:
 db-clean:
     python -m test_data.db_flush_all
     python -m test_data.db_fill_plans
+
+# Применение всех неприменённых миграций Alembic
+migrate:
+    python -m alembic upgrade head
