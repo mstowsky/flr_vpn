@@ -17,6 +17,8 @@ from app.bot.keyboards.user import (
 
 from app.config import DISPLAY_TIMEZONE
 from app.database import async_session_factory
+from app.models.payment import Payment
+from app.models.plan import Plan
 from app.models.user import User
 from app.services.payments import create_payment
 from app.services.plans import get_active_plans
@@ -150,11 +152,44 @@ async def subscription_command(message: Message) -> None:
         )
 
         if info is None:
-            await message.answer(
-                "У тебя пока нет действующей подписки.\n\n"
-                "Чтобы получить бесплатный пробный период, "
-                "используй команду /trial."
+            # Ищем последнюю неоплаченную заявку пользователя.
+            pending_plan_result = await session.execute(
+                select(Plan.name)
+                .join(
+                    Payment,
+                    Payment.plan_id == Plan.id,
+                )
+                .where(
+                    Payment.user_id == user.id,
+                    Payment.status == "pending",
+                )
+                .order_by(
+                    Payment.created_at.desc(),
+                    Payment.id.desc(),
+                )
+                .limit(1)
             )
+
+            pending_plan_name = (
+                pending_plan_result.scalar_one_or_none()
+            )
+
+            if pending_plan_name is not None:
+                await message.answer(
+                    "У тебя пока нет действующей подписки.\n\n"
+                    "📋 В системе имеется заявка на подключение "
+                    f"подписки «{pending_plan_name}».\n\n"
+                    "После подтверждения оплаты подписка будет "
+                    "активирована, а задача на настройку VPN-доступа "
+                    "появится в очереди."
+                )
+            else:
+                await message.answer(
+                    "У тебя пока нет действующей подписки.\n\n"
+                    "Чтобы получить бесплатный пробный период, "
+                    "используй команду /trial."
+                )
+
             return
 
 

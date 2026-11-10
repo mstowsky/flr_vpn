@@ -6,7 +6,13 @@ from aiogram import Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.filters.command import CommandObject
-from aiogram.types import Message
+from aiogram import F
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 
 from app.config import ADMIN_TELEGRAM_ID, DISPLAY_TIMEZONE, ENABLE_TEST_COMMANDS
 from app.database import async_session_factory
@@ -24,6 +30,25 @@ from app.services.subscriptions import subscription_deactivate
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def get_task_keyboard(task_id: int) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру управления задачей."""
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Подтвердить",
+                    callback_data=f"task:complete:{task_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"task:fail:{task_id}",
+                ),
+            ]
+        ]
+    )
 
 
 def _is_admin(message: Message) -> bool:
@@ -117,24 +142,20 @@ async def tasks_command(message: Message) -> None:
                 tzinfo=timezone.utc
             ).astimezone(DISPLAY_TIMEZONE)
 
-            lines.append(
+            task_text = (
                 f"Задача id: {task.id}\n"
                 f"Тип: {task_types.get(task.task_type, task.task_type)}\n"
                 f"Статус: {task.status}\n"
                 f"{user_info}\n"
                 f"Название подписки: {subscription_name}\n"
                 f"Подписка ID: {task.subscription_id or 'не указана'}\n"
-                f"Создана: {created_at:%d.%m.%Y %H:%M}\n"
+                f"Создана: {created_at:%d.%m.%Y %H:%M}"
             )
 
-    response = "\n".join(lines)
-
-    # Не превышаем ограничение длины сообщения Telegram.
-    max_length = 3500
-
-    for start in range(0, len(response), max_length):
-        await message.answer(response[start:start + max_length])
-
+            await message.answer(
+                task_text,
+                reply_markup=get_task_keyboard(task.id),
+            )
 
 
 @router.message(Command("complete"))
@@ -240,6 +261,156 @@ async def complete_command(
     await message.answer(
         f"Задача #{task.id} отмечена выполненной."
     )
+
+
+@router.callback_query(F.data.startswith("task:complete:"))
+async def task_complete_callback(callback: CallbackQuery) -> None:
+    """Выполняет задачу через inline-кнопку."""
+
+    if callback.from_user.id != ADMIN_TELEGRAM_ID:
+        await callback.answer(
+            "У вас нет доступа к этому действию.",
+            show_alert=True,
+        )
+        return
+
+    try:
+        task_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, AttributeError):
+        await callback.answer(
+            "Некорректный ID задачи.",
+            show_alert=True,
+        )
+        return
+
+    notification_data = None
+
+    async with async_session_factory() as session:
+        try:
+            task = await complete_provisioning_task(
+                session,
+                task_id=task_id,
+                result_message=(
+                    "Выполнено администратором "
+                    f"Telegram ID {callback.from_user.id}"
+                ),
+            )
+        except ValueError as exc:
+            await callback.answer(
+                str(exc),
+                show_alert=True,
+            )
+            return
+
+        if (
+            task.task_type in {"create", "extend", "disable"}
+            and task.subscription_id is not None
+        ):
+            user = await session.get(User, task.user_id)
+
+            subscription = await session.get(
+                Subscription,
+                task.subscription_id,
+            )
+
+            if user is not None and subscription is not None:
+                plan = await session.get(
+                    Plan,
+                    subscription.plan_id,
+                )
+
+                if plan is not None:
+                    notification_data = {
+                        "telegram_id": user.telegram_id,
+                        "plan_name": plan.name,
+                    }
+
+    # Уведомляем клиента после сохранения результата.
+    if notification_data is not None:
+        try:
+            await callback.bot.send_message(
+                chat_id=notification_data["telegram_id"],
+                text=(
+                    (
+                        "❌ Ваша подписка "
+                        f"«{notification_data['plan_name']}» "
+                        "деактивирована."
+                    )
+                    if task.task_type == "disable"
+                    else (
+                        "✅ Ваша подписка "
+                        f"«{notification_data['plan_name']}» "
+                        "активирована."
+                    )
+                ),
+            )
+        except TelegramAPIError:
+            logger.exception(
+                "Не удалось отправить уведомление "
+                "пользователю %s после выполнения задачи",
+                notification_data["telegram_id"],
+            )
+
+    await callback.answer("Задача выполнена!")
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            f"{callback.message.text}\n\n"
+            "✅ Задача отмечена выполненной.",
+            reply_markup=None,
+        )
+
+
+@router.callback_query(F.data.startswith("task:fail:"))
+async def task_fail_callback(callback: CallbackQuery) -> None:
+    """Отмечает задачу неудачной через inline-кнопку."""
+
+    if callback.from_user.id != ADMIN_TELEGRAM_ID:
+        await callback.answer(
+            "У вас нет доступа к этому действию.",
+            show_alert=True,
+        )
+        return
+
+    try:
+        task_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, AttributeError):
+        await callback.answer(
+            "Некорректный ID задачи.",
+            show_alert=True,
+        )
+        return
+
+    reason = "Причина не указана"
+
+    async with async_session_factory() as session:
+        try:
+            task = await fail_provisioning_task(
+                session,
+                task_id=task_id,
+                result_message=(
+                    f"Ошибка: {reason}. "
+                    "Администратор Telegram ID "
+                    f"{callback.from_user.id}"
+                ),
+            )
+        except ValueError as exc:
+            await callback.answer(
+                str(exc),
+                show_alert=True,
+            )
+            return
+
+    await callback.answer("Задача отменена.")
+
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            f"{callback.message.text}\n\n"
+            "❌ Задача отмечена как неудачная.\n"
+            f"Причина: {reason}\n"
+            f"Для повторной попытки используй /retry {task.id}",
+            reply_markup=None,
+        )
 
 
 @router.message(Command("fail"))
