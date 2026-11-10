@@ -8,6 +8,8 @@ from app.bot.main import start_bot
 from app.config import BOT_TOKEN
 from app.database import close_db
 
+logger = logging.getLogger(__name__)
+
 
 async def main() -> None:
     session = AiohttpSession(
@@ -33,4 +35,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("Получен Ctrl+C, бот остановлен")
+        logger.info("Получен Ctrl+C, бот остановлен")

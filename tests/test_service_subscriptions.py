@@ -423,7 +423,7 @@ async def test_get_user_subscription_info_returns_details(
     """Информация о действующей подписке содержит нужные поля."""
     now = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
-    subscription = await create_subscription(
+    await create_subscription(
         session,
         user_id=user.id,
         plan_id=plan.id,
