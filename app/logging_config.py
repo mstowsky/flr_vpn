@@ -130,7 +130,7 @@ class DailyLogHandler(logging.Handler):
                 self.stream.write(message + "\n")
                 self.stream.flush()
 
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.handleError(record)
 
     def close(self):
