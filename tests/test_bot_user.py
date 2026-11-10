@@ -9,6 +9,7 @@ from app.bot.handlers import user as bot_main
 from app.bot.keyboards.user import (
     BUY_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
+    SUPPORT_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
     get_user_keyboard,
 )
@@ -221,6 +222,7 @@ def test_user_keyboard_contains_expected_buttons():
         SUBSCRIPTION_BUTTON_TEXT,
         TRIAL_BUTTON_TEXT,
         BUY_BUTTON_TEXT,
+        SUPPORT_BUTTON_TEXT,
     ]
 
 

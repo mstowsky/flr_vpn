@@ -4,16 +4,21 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from app.bot.keyboards.user import (
     BUY_BUTTON_TEXT,
+    CANCEL_SUPPORT_BUTTON_TEXT,
     SUBSCRIPTION_BUTTON_TEXT,
+    SUPPORT_BUTTON_TEXT,
     TRIAL_BUTTON_TEXT,
     get_buy_keyboard,
+    get_support_cancel_keyboard,
     get_user_keyboard,
 )
+from app.bot.states.support import SupportStates
 from app.config import DISPLAY_TIMEZONE
 from app.database import async_session_factory
 from app.models.payment import Payment
@@ -33,8 +38,13 @@ router = Router()
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(
+    message: Message,
+    state: FSMContext,
+) -> None:
     telegram_user = message.from_user
+
+    await state.clear()
 
     if telegram_user is None:
         await message.answer(
@@ -72,6 +82,64 @@ async def cmd_start(message: Message) -> None:
     await message.answer(
         text,
         reply_markup=get_user_keyboard(),
+    )
+
+
+
+@router.message(F.text == SUPPORT_BUTTON_TEXT)
+async def support_start(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Включает режим ожидания сообщения для поддержки."""
+
+    await state.set_state(
+        SupportStates.waiting_for_message
+    )
+
+    await message.answer(
+        "🆘 Опиши свою проблему или задай вопрос.\n\n"
+        "Напиши сообщение, и мы поможем тебе.\n\n"
+        "Чтобы отменить обращение, нажми кнопку «Отмена» "
+        "или отправь команду /cancel.",
+        reply_markup=get_support_cancel_keyboard(),
+    )
+
+
+@router.message(
+    SupportStates.waiting_for_message,
+    Command("cancel"),
+)
+@router.message(
+    SupportStates.waiting_for_message,
+    F.text == CANCEL_SUPPORT_BUTTON_TEXT,
+)
+async def support_cancel(
+    message: Message,
+    state: FSMContext,
+) -> None:
+    """Отменяет режим ожидания сообщения для поддержки."""
+
+    await state.clear()
+
+    await message.answer(
+        "Создание обращения отменено.",
+        reply_markup=get_user_keyboard(),
+    )
+
+
+@router.message(SupportStates.waiting_for_message)
+async def support_message_waiting(
+    message: Message,
+) -> None:
+    """Временно обрабатывает сообщение в режиме поддержки."""
+
+    await message.answer(
+        "Режим поддержки активен.\n\n"
+        "Передача сообщений администратору будет "
+        "подключена на следующем этапе.\n\n"
+        "Чтобы выйти, нажми «Отмена» или отправь /cancel.",
+        reply_markup=get_support_cancel_keyboard(),
     )
 
 

@@ -10,7 +10,8 @@ from app.models.plan import Plan
 BUY_BUTTON_TEXT = "🛒 Выбрать тариф"
 SUBSCRIPTION_BUTTON_TEXT = "📋 Моя подписка"
 TRIAL_BUTTON_TEXT = "🎁 Пробный период"
-
+SUPPORT_BUTTON_TEXT = "🆘 Поддержка"
+CANCEL_SUPPORT_BUTTON_TEXT = "❌ Отмена"
 
 def get_user_keyboard() -> ReplyKeyboardMarkup:
     """Создаёт постоянную клавиатуру клиента."""
@@ -22,6 +23,9 @@ def get_user_keyboard() -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(text=TRIAL_BUTTON_TEXT),
                 KeyboardButton(text=BUY_BUTTON_TEXT),
+            ],
+            [
+                KeyboardButton(text=SUPPORT_BUTTON_TEXT),
             ],
         ],
         resize_keyboard=True,
@@ -41,4 +45,17 @@ def get_buy_keyboard(plans: list[Plan]) -> InlineKeyboardMarkup:
             ]
             for plan in plans
         ]
+    )
+
+
+def get_support_cancel_keyboard() -> ReplyKeyboardMarkup:
+    """Создаёт клавиатуру отмены обращения в поддержку."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=CANCEL_SUPPORT_BUTTON_TEXT),
+            ],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Напиши сообщение",
     )
