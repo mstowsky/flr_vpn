@@ -5,7 +5,7 @@ from sqlalchemy import text
 from app.database import DATABASE_URL, engine
 
 
-async def flush_database() -> None:
+async def flush_database() -> bool:
     """Удаляет все записи из таблиц прикладной базы данных."""
 
     print(f"База данных: {DATABASE_URL}")
@@ -20,7 +20,7 @@ async def flush_database() -> None:
 
     if confirmation != "DELETE":
         print("Очистка отменена.")
-        return
+        return False
 
     async with engine.begin() as connection:
         # Получаем все таблицы текущей SQLite-базы.
@@ -58,9 +58,13 @@ async def flush_database() -> None:
 
     print("\nОчистка базы данных завершена.")
 
+    return True
 
 if __name__ == "__main__":
     try:
-        asyncio.run(flush_database())
+        success = asyncio.run(flush_database())
     finally:
         asyncio.run(engine.dispose())
+
+    if not success:
+        raise SystemExit(1)
